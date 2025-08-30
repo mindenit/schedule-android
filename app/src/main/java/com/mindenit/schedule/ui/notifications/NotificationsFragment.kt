@@ -9,7 +9,9 @@ import androidx.fragment.app.Fragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.mindenit.schedule.R
 import com.mindenit.schedule.databinding.FragmentNotificationsBinding
+import android.widget.Toast
 import androidx.preference.PreferenceManager
+import com.mindenit.schedule.data.SchedulesStorage
 
 class NotificationsFragment : Fragment() {
 
@@ -29,6 +31,7 @@ class NotificationsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         binding.themeRow.setOnClickListener { showThemeDialog() }
         binding.defaultViewRow.setOnClickListener { showDefaultViewDialog() }
+        binding.btnClearData.setOnClickListener { confirmClearAll() }
         syncDefaultViewSummary()
     }
 
@@ -68,6 +71,26 @@ class NotificationsFragment : Fragment() {
                 syncDefaultViewSummary()
             }
             .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmClearAll() {
+        val ctx = requireContext()
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.settings_clear_all)
+            .setMessage(R.string.settings_clear_all_desc)
+            .setPositiveButton(R.string.confirm) { dialog, _ ->
+                // Clear schedules and active selection
+                val storage = SchedulesStorage(ctx)
+                storage.clear()
+                storage.clearActive()
+                // Reset preferences
+                PreferenceManager.getDefaultSharedPreferences(ctx).edit().clear().apply()
+                Toast.makeText(ctx, R.string.cleared, Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                requireActivity().recreate()
+            }
+            .setNegativeButton(R.string.cancel, null)
             .show()
     }
 

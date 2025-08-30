@@ -1,0 +1,13 @@
+<resources>
+    <style name="App.TabTextAppearance" parent="TextAppearance.Material3.LabelLarge">
+        <item name="textAllCaps">false</item>
+    </style>
+
+    <style name="App.TabLayout.Dialog" parent="Widget.Material3.TabLayout">
+        <item name="tabTextAppearance">@style/App.TabTextAppearance</item>
+        <item name="android:background">?attr/colorSurfaceContainerLow</item>
+        <item name="tabIndicatorColor">?attr/colorPrimary</item>
+        <item name="tabIndicatorHeight">2dp</item>
+        <item name="tabIndicatorFullWidth">true</item>
+    </style>
+</resources>

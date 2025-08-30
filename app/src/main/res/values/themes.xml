@@ -7,6 +7,8 @@
         <!-- Secondary brand color. -->
         <item name="colorSecondary">@color/teal_200</item>
         <item name="colorOnSecondary">@color/black</item>
+        <!-- Use Material 3 bottom sheet dialog look -->
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.Material3.BottomSheetDialog</item>
         <!-- Customize your theme here. -->
     </style>
 </resources>

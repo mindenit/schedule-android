@@ -39,7 +39,7 @@ class DayScheduleView @JvmOverloads constructor(
     // Dimensions
     private val hourHeightDp = 56f
     private val headerHeightDp = 0f // remove internal header space
-    private val timeColWidthDp = 64f
+    private val timeColWidthDp = 36f
     private val hourLineWidth = 1f
 
     private val density = resources.displayMetrics.density

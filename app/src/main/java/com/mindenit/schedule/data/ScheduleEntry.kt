@@ -27,10 +27,11 @@ data class ScheduleEntry(
     val type: ScheduleType,
     val id: Long,
     val name: String,
-    val payload: String? = null
+    val payload: String? = null,
+    val createdAt: Long? = null
 ) {
     companion object {
         fun from(type: String, id: Long, name: String, payload: String? = null): ScheduleEntry =
-            ScheduleEntry(ScheduleType.from(type), id, name, payload)
+            ScheduleEntry(ScheduleType.from(type), id, name, payload, System.currentTimeMillis())
     }
 }

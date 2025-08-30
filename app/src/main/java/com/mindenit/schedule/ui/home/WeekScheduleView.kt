@@ -42,7 +42,7 @@ class WeekScheduleView @JvmOverloads constructor(
     // Dimensions
     private val hourHeightDp = 56f
     private val headerHeightDp = 44f
-    private val timeColWidthDp = 56f
+    private val timeColWidthDp = 36f
     private val hourLineWidth = 1f
 
     private val density = resources.displayMetrics.density

@@ -13,7 +13,9 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.mindenit.schedule.R
 import com.mindenit.schedule.databinding.FragmentHomeBinding
 import java.time.DayOfWeek
@@ -22,6 +24,7 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.temporal.TemporalAdjusters
 import androidx.preference.PreferenceManager
+import com.mindenit.schedule.data.SchedulesStorage
 
 class HomeFragment : Fragment() {
 
@@ -44,6 +47,8 @@ class HomeFragment : Fragment() {
     // Simple in-fragment back stack to remember previous view and selection
     private data class ViewState(val mode: ViewMode, val ym: YearMonth, val date: LocalDate)
     private val backStack = ArrayDeque<ViewState>()
+
+    private var hasActiveSchedule: Boolean = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -126,14 +131,27 @@ class HomeFragment : Fragment() {
             else -> viewMode = ViewMode.MONTH
         }
 
-        // Initial render and title
-        renderCurrentMode()
+        // Determine active schedule and update UI before first render
+        updateActiveState()
+
+        // Wire empty action button to navigate to schedules screen via BottomNavigationView
+        binding.emptyAction.setOnClickListener {
+            val navBar = requireActivity().findViewById<BottomNavigationView>(R.id.nav_view)
+            navBar?.selectedItemId = R.id.navigation_dashboard
+        }
+
+        // Initial render and title (only if active schedule exists)
+        if (hasActiveSchedule) renderCurrentMode() else setTitleForMode()
 
         // Menu in toolbar (calendar view switcher)
         val menuHost: MenuHost = requireActivity()
         menuHost.addMenuProvider(object : MenuProvider {
             override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
                 menuInflater.inflate(R.menu.menu_home, menu)
+            }
+            override fun onPrepareMenu(menu: Menu) {
+                // Hide calendar view switcher when no active schedule
+                menu.findItem(R.id.action_calendar_view)?.isVisible = hasActiveSchedule
             }
             override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
                 return when (menuItem.itemId) {
@@ -294,11 +312,19 @@ class HomeFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        setTitleForMode()
+        // Re-evaluate active schedule on return to this screen
+        updateActiveState()
+        if (hasActiveSchedule) renderCurrentMode() else setTitleForMode()
+        // Ask Activity to refresh menu visibility
+        (activity as? AppCompatActivity)?.invalidateOptionsMenu()
     }
 
     private fun setTitleForMode() {
         val ab = (activity as? AppCompatActivity)?.supportActionBar ?: return
+        if (!hasActiveSchedule) {
+            ab.title = getString(R.string.title_home)
+            return
+        }
         when (viewMode) {
             ViewMode.MONTH -> ab.title = DateTitleFormatter.formatMonthTitle(selectedYearMonth)
             ViewMode.WEEK -> ab.title = ""
@@ -322,12 +348,22 @@ class HomeFragment : Fragment() {
     }
 
     private fun renderCurrentMode() {
+        if (!hasActiveSchedule) {
+            // Hide all calendar views and show empty state container
+            binding.calendarGrid.isGone = true
+            binding.weekScroll.isGone = true
+            binding.dayScroll.isGone = true
+            binding.emptyState.isVisible = true
+            setTitleForMode()
+            return
+        }
         when (viewMode) {
             ViewMode.MONTH -> {
                 // Show grid, hide week and day views
                 binding.calendarGrid.isVisible = true
                 binding.weekScroll.isGone = true
                 binding.dayScroll.isGone = true
+                binding.emptyState.isGone = true
 
                 val days = generateMonthGrid(selectedYearMonth)
                 applyData(days, spanCount = 7, rows = rowsCount)
@@ -337,6 +373,7 @@ class HomeFragment : Fragment() {
                 binding.calendarGrid.isGone = true
                 binding.dayScroll.isGone = true
                 binding.weekScroll.isVisible = true
+                binding.emptyState.isGone = true
 
                 val startOfWeek = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 // No fake events: pass empty list
@@ -353,6 +390,7 @@ class HomeFragment : Fragment() {
                 binding.calendarGrid.isGone = true
                 binding.weekScroll.isGone = true
                 binding.dayScroll.isVisible = true
+                binding.emptyState.isGone = true
 
                 // No fake events: pass empty list
                 binding.dayView.setDay(selectedDate, emptyList())
@@ -365,6 +403,18 @@ class HomeFragment : Fragment() {
             }
         }
         setTitleForMode()
+    }
+
+    private fun updateActiveState() {
+        hasActiveSchedule = SchedulesStorage(requireContext()).getActive() != null
+        // Update empty state content and visibility
+        binding.emptyText.text = getString(R.string.calendar_empty_state)
+        binding.emptyState.isVisible = !hasActiveSchedule
+        if (!hasActiveSchedule) {
+            binding.calendarGrid.isGone = true
+            binding.weekScroll.isGone = true
+            binding.dayScroll.isGone = true
+        }
     }
 
     private fun applyData(days: List<CalendarDay>, spanCount: Int, rows: Int) {

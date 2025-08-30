@@ -61,6 +61,33 @@ class MonthAdapter(
             onDayClick(item.date)
         }
 
+        // Highlight today with a pill background behind the number
+        val today = LocalDate.now()
+        if (item.date == today) {
+            val bgColor = MaterialColors.getColor(view, com.google.android.material.R.attr.colorPrimary)
+            val textColor = MaterialColors.getColor(view, com.google.android.material.R.attr.colorOnPrimary)
+            val size = dpToPx(view, 28f)
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = size / 2f
+                setColor(bgColor)
+            }
+            holder.dayNumber.background = bg
+            holder.dayNumber.setTextColor(textColor)
+            val lp = holder.dayNumber.layoutParams
+            lp.width = size
+            lp.height = size
+            holder.dayNumber.layoutParams = lp
+        } else {
+            // Reset to default appearance for non-today cells
+            holder.dayNumber.background = null
+            holder.dayNumber.setTextColor(MaterialColors.getColor(view, com.google.android.material.R.attr.colorOnSurface))
+            val lp = holder.dayNumber.layoutParams
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            holder.dayNumber.layoutParams = lp
+        }
+
         if (item.eventCount > 0) {
             holder.eventsCount.visibility = View.VISIBLE
             holder.eventsCount.text = item.eventCount.toString()

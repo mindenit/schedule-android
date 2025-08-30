@@ -2,7 +2,7 @@
     <string name="app_name">Schedule</string>
     <string name="title_home">Календар</string>
     <string name="title_dashboard">Розклади</string>
-    <string name="title_notifications">Меню</string>
+    <string name="title_notifications">Налаштування</string>
 
     <!-- a11y: %1$d = day number, %2$d = events count -->
     <string name="accessibility_calendar_day_format">День %1$d, подій: %2$d</string>
@@ -27,4 +27,26 @@
     <string name="loading">Завантаження…</string>
     <string name="error_loading">Помилка завантаження</string>
     <string name="search_hint">Пошук</string>
+    <string name="settings_clear_all">Очистити всі дані</string>
+    <string name="settings_clear_all_desc">Видалити всі збережені розклади і скинути налаштування</string>
+    <string name="confirm">Підтвердити</string>
+    <string name="cancel">Скасувати</string>
+    <string name="cleared">Дані очищено</string>
+    <string name="schedule_details_title">Деталі розкладу</string>
+    <string name="delete">Видалити</string>
+    <string name="close">Закрити</string>
+
+    <!-- Schedule details bottom sheet labels -->
+    <string name="label_id">ID</string>
+    <string name="label_type">Тип</string>
+    <string name="label_name">Назва</string>
+    <string name="label_added">Додано</string>
+    <string name="set_active">Зробити активним</string>
+    <string name="active_tag"> (активний)</string>
+    <string name="schedule_type_group">Група</string>
+    <string name="schedule_type_teacher">Викладач</string>
+    <string name="schedule_type_auditorium">Аудиторія</string>
+    <string name="active">Активний</string>
+    <string name="calendar_empty_state">Немає активного розкладу. Додайте розклад, щоб переглядати календар.</string>
+    <string name="select_schedule">Обрати розклад</string>
 </resources>

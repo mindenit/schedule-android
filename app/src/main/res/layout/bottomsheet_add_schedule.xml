@@ -12,11 +12,9 @@
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabs"
-        style="@style/Widget.Material3.TabLayout"
+        style="@style/App.TabLayout.Dialog"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:tabIndicatorAnimationMode="elastic"
-        app:tabIndicatorAnimationDuration="300"
         app:tabIndicatorFullWidth="false"
         app:tabMode="fixed"
         app:tabGravity="fill" />

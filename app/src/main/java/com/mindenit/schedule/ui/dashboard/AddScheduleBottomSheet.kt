@@ -19,6 +19,8 @@ import com.mindenit.schedule.R
 
 class AddScheduleBottomSheet : BottomSheetDialogFragment() {
 
+    override fun getTheme(): Int = com.google.android.material.R.style.ThemeOverlay_Material3_BottomSheetDialog
+
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val dialog = super.onCreateDialog(savedInstanceState) as BottomSheetDialog
         dialog.setOnShowListener { _: DialogInterface ->
