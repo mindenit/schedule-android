@@ -2,9 +2,6 @@ package com.mindenit.schedule.ui.home
 
 import android.os.Bundle
 import android.view.*
-import android.view.GestureDetector
-import android.view.MotionEvent
-import android.view.ViewParent
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.AnimationUtils
 import androidx.activity.OnBackPressedCallback
@@ -21,12 +18,9 @@ import com.mindenit.schedule.R
 import com.mindenit.schedule.databinding.FragmentHomeBinding
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
-import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 import androidx.preference.PreferenceManager
 
 class HomeFragment : Fragment() {
@@ -42,40 +36,14 @@ class HomeFragment : Fragment() {
     private enum class ViewMode { MONTH, WEEK, DAY }
     private var viewMode: ViewMode = ViewMode.MONTH
 
-    // Gesture handling for month switching
+    // Animation flags
     private var isMonthAnimating = false
-    private lateinit var monthGestureDetector: GestureDetector
-    private var monthSwipeHandled = false
-
-    // Day view gesture state
     private var isDayAnimating = false
-    private lateinit var dayGestureDetector: GestureDetector
-    private var daySwipeHandled = false
-
-    // Week view gesture state
     private var isWeekAnimating = false
-    private lateinit var weekGestureDetector: GestureDetector
-    private var weekSwipeHandled = false
 
-    private val localeUk = Locale.forLanguageTag("uk")
-
-    // Helpers: Ukrainian title-case of first letter
-    private fun ukTitleCase(s: String): String = s.replaceFirstChar { ch ->
-        if (ch.isLowerCase()) ch.titlecase(localeUk) else ch.toString()
-    }
-
-    private fun formatMonthTitle(ym: YearMonth): String {
-        val monthName = ym.month.getDisplayName(TextStyle.FULL_STANDALONE, localeUk)
-        return "${ukTitleCase(monthName)} ${ym.year}"
-    }
-
-    private fun formatDayTitle(date: LocalDate): String {
-        val dow = ukTitleCase(date.dayOfWeek.getDisplayName(TextStyle.FULL, localeUk))
-        // Use MMMM to get genitive month when used with day number
-        val datePart = date.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", localeUk))
-        // Keep month in genitive lowercase; only day-of-week capitalized per UA style
-        return "$dow, $datePart"
-    }
+    // Simple in-fragment back stack to remember previous view and selection
+    private data class ViewState(val mode: ViewMode, val ym: YearMonth, val date: LocalDate)
+    private val backStack = ArrayDeque<ViewState>()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -86,32 +54,62 @@ class HomeFragment : Fragment() {
         return binding.root
     }
 
+    // Navigate between modes and optionally push current state
+    private fun goToMode(newMode: ViewMode, push: Boolean = true) {
+        if (newMode == viewMode) {
+            setTitleForMode()
+            return
+        }
+        if (push) backStack.addLast(ViewState(viewMode, selectedYearMonth, selectedDate))
+        viewMode = newMode
+        renderCurrentMode()
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         // Setup Recycler
         adapter = MonthAdapter(emptyList()) { clickedDate ->
             selectedDate = clickedDate
-            viewMode = ViewMode.DAY
-            renderCurrentMode()
+            // From month grid to specific day
+            goToMode(ViewMode.DAY)
         }
         binding.calendarGrid.layoutManager = GridLayoutManager(requireContext(), 7)
         binding.calendarGrid.setHasFixedSize(true)
         binding.calendarGrid.adapter = adapter
 
-        // Gestures for month switching (Month View only)
-        setupMonthSwipeGestures()
-        // Gestures for day switching (Day View only)
-        setupDaySwipeGestures()
-        // Gestures for week switching (Week View only)
-        setupWeekSwipeGestures()
+        // Attach swipe helpers instead of custom detectors
+        SwipeGestureHelper(
+            view = binding.calendarGrid,
+            condition = { viewMode == ViewMode.MONTH && !isMonthAnimating },
+            onSwipeLeft = { switchMonthAnimated(next = true) },
+            onSwipeRight = { switchMonthAnimated(next = false) }
+        )
+        SwipeGestureHelper(
+            view = binding.dayView,
+            condition = { viewMode == ViewMode.DAY && !isDayAnimating },
+            onSwipeLeft = { switchDayAnimated(next = true) },
+            onSwipeRight = { switchDayAnimated(next = false) }
+        )
+        SwipeGestureHelper(
+            view = binding.weekView,
+            condition = { viewMode == ViewMode.WEEK && !isWeekAnimating },
+            onSwipeLeft = { switchWeekAnimated(next = true) },
+            onSwipeRight = { switchWeekAnimated(next = false) }
+        )
 
-        // Handle system Back: in Day view return to Month view
+        // Handle system Back with smart stack: pop previous view if present; else ensure Month; else default
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (viewMode == ViewMode.DAY) {
-                    viewMode = ViewMode.MONTH
-                    renderCurrentMode()
+                if (backStack.isNotEmpty()) {
+                    val prev = backStack.removeLast()
+                    selectedYearMonth = prev.ym
+                    selectedDate = prev.date
+                    goToMode(prev.mode, push = false)
+                    return
+                }
+                if (viewMode != ViewMode.MONTH) {
+                    goToMode(ViewMode.MONTH, push = false)
                 } else {
                     // Let system handle
                     isEnabled = false
@@ -147,53 +145,6 @@ class HomeFragment : Fragment() {
                 }
             }
         }, viewLifecycleOwner, Lifecycle.State.RESUMED)
-    }
-
-    private fun setupMonthSwipeGestures() {
-        val touchSlopPx = dpToPx(24f)
-        val velocityThreshold = dpToPx(200f)
-        monthGestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                // Start tracking a new gesture only in Month mode and when not animating
-                monthSwipeHandled = false
-                return viewMode == ViewMode.MONTH && !isMonthAnimating
-            }
-            override fun onSingleTapUp(e: MotionEvent): Boolean {
-                return false
-            }
-            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-                if (viewMode != ViewMode.MONTH || isMonthAnimating || e1 == null || monthSwipeHandled) return false
-                val dx = e2.x - e1.x
-                val dy = e2.y - e1.y
-                if (kotlin.math.abs(dx) > kotlin.math.abs(dy) && kotlin.math.abs(dx) > touchSlopPx) {
-                    // Lock this gesture to avoid double triggering and disallow parent intercept
-                    monthSwipeHandled = true
-                    (binding.calendarGrid.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (dx < 0) switchMonthAnimated(next = true) else switchMonthAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (viewMode != ViewMode.MONTH || isMonthAnimating || monthSwipeHandled) return false
-                if (kotlin.math.abs(velocityX) > velocityThreshold) {
-                    monthSwipeHandled = true
-                    (binding.calendarGrid.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (velocityX < 0) switchMonthAnimated(next = true) else switchMonthAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-        })
-
-        binding.calendarGrid.setOnTouchListener { _, event ->
-            if (viewMode != ViewMode.MONTH) return@setOnTouchListener false
-            val handled = monthGestureDetector.onTouchEvent(event)
-            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                monthSwipeHandled = false
-            }
-            handled
-        }
     }
 
     private fun switchMonthAnimated(next: Boolean) {
@@ -240,49 +191,6 @@ class HomeFragment : Fragment() {
                     .start()
             }
             .start()
-    }
-
-    private fun setupDaySwipeGestures() {
-        val touchSlopPx = dpToPx(24f)
-        val velocityThreshold = dpToPx(200f)
-        dayGestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                daySwipeHandled = false
-                return viewMode == ViewMode.DAY && !isDayAnimating
-            }
-            override fun onSingleTapUp(e: MotionEvent): Boolean = false
-            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-                if (viewMode != ViewMode.DAY || isDayAnimating || e1 == null || daySwipeHandled) return false
-                val dx = e2.x - e1.x
-                val dy = e2.y - e1.y
-                if (kotlin.math.abs(dx) > kotlin.math.abs(dy) && kotlin.math.abs(dx) > touchSlopPx) {
-                    daySwipeHandled = true
-                    (binding.dayView.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (dx < 0) switchDayAnimated(next = true) else switchDayAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (viewMode != ViewMode.DAY || isDayAnimating || daySwipeHandled) return false
-                if (kotlin.math.abs(velocityX) > velocityThreshold) {
-                    daySwipeHandled = true
-                    (binding.dayView.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (velocityX < 0) switchDayAnimated(next = true) else switchDayAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-        })
-
-        binding.dayView.setOnTouchListener { _, event ->
-            if (viewMode != ViewMode.DAY) return@setOnTouchListener false
-            val handled = dayGestureDetector.onTouchEvent(event)
-            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                daySwipeHandled = false
-            }
-            handled
-        }
     }
 
     private fun switchDayAnimated(next: Boolean) {
@@ -332,49 +240,6 @@ class HomeFragment : Fragment() {
                     .start()
             }
             .start()
-    }
-
-    private fun setupWeekSwipeGestures() {
-        val touchSlopPx = dpToPx(24f)
-        val velocityThreshold = dpToPx(200f)
-        weekGestureDetector = GestureDetector(requireContext(), object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                weekSwipeHandled = false
-                return viewMode == ViewMode.WEEK && !isWeekAnimating
-            }
-            override fun onSingleTapUp(e: MotionEvent): Boolean = false
-            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-                if (viewMode != ViewMode.WEEK || isWeekAnimating || e1 == null || weekSwipeHandled) return false
-                val dx = e2.x - e1.x
-                val dy = e2.y - e1.y
-                if (kotlin.math.abs(dx) > kotlin.math.abs(dy) && kotlin.math.abs(dx) > touchSlopPx) {
-                    weekSwipeHandled = true
-                    (binding.weekView.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (dx < 0) switchWeekAnimated(next = true) else switchWeekAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (viewMode != ViewMode.WEEK || isWeekAnimating || weekSwipeHandled) return false
-                if (kotlin.math.abs(velocityX) > velocityThreshold) {
-                    weekSwipeHandled = true
-                    (binding.weekView.parent as? ViewParent)?.requestDisallowInterceptTouchEvent(true)
-                    if (velocityX < 0) switchWeekAnimated(next = true) else switchWeekAnimated(next = false)
-                    return true
-                }
-                return false
-            }
-        })
-
-        binding.weekView.setOnTouchListener { _, event ->
-            if (viewMode != ViewMode.WEEK) return@setOnTouchListener false
-            val handled = weekGestureDetector.onTouchEvent(event)
-            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                weekSwipeHandled = false
-            }
-            handled
-        }
     }
 
     private fun switchWeekAnimated(next: Boolean) {
@@ -427,8 +292,6 @@ class HomeFragment : Fragment() {
             .start()
     }
 
-    private fun dpToPx(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
-
     override fun onResume() {
         super.onResume()
         setTitleForMode()
@@ -437,9 +300,9 @@ class HomeFragment : Fragment() {
     private fun setTitleForMode() {
         val ab = (activity as? AppCompatActivity)?.supportActionBar ?: return
         when (viewMode) {
-            ViewMode.MONTH -> ab.title = formatMonthTitle(selectedYearMonth)
+            ViewMode.MONTH -> ab.title = DateTitleFormatter.formatMonthTitle(selectedYearMonth)
             ViewMode.WEEK -> ab.title = ""
-            ViewMode.DAY -> ab.title = formatDayTitle(selectedDate)
+            ViewMode.DAY -> ab.title = DateTitleFormatter.formatDayTitle(selectedDate)
         }
     }
 
@@ -449,9 +312,9 @@ class HomeFragment : Fragment() {
         popup.menuInflater.inflate(R.menu.popup_calendar_view, popup.menu)
         popup.setOnMenuItemClickListener { item: MenuItem ->
             when (item.itemId) {
-                R.id.view_month -> { viewMode = ViewMode.MONTH; renderCurrentMode(); true }
-                R.id.view_week -> { viewMode = ViewMode.WEEK; renderCurrentMode(); true }
-                R.id.view_day -> { viewMode = ViewMode.DAY; renderCurrentMode(); true }
+                R.id.view_month -> { goToMode(ViewMode.MONTH); true }
+                R.id.view_week -> { goToMode(ViewMode.WEEK); true }
+                R.id.view_day -> { goToMode(ViewMode.DAY); true }
                 else -> false
             }
         }
