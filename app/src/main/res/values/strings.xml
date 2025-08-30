@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Schedule</string>
+    <string name="title_home">Календар</string>
+    <string name="title_dashboard">Розклади</string>
+    <string name="title_notifications">Меню</string>
+
+    <!-- a11y: %1$d = day number, %2$d = events count -->
+    <string name="accessibility_calendar_day_format">День %1$d, подій: %2$d</string>
+</resources>
