@@ -6,4 +6,17 @@
 
     <!-- a11y: %1$d = day number, %2$d = events count -->
     <string name="accessibility_calendar_day_format">День %1$d, подій: %2$d</string>
+
+    <!-- Calendar view switching -->
+    <string name="action_calendar_view">Перегляд</string>
+    <string name="view_month">Місяць</string>
+    <string name="view_week">Тиждень</string>
+    <string name="view_day">День</string>
+
+    <!-- Settings screen -->
+    <string name="settings_category_appearance">Вигляд</string>
+    <string name="pref_theme_title">Тема</string>
+    <string name="pref_theme_summary">Використовувати системну, світлу або темну тему</string>
+    <string name="settings_default_view_title">Режим перегляду за замовчуванням</string>
+    <string name="settings_default_view_summary">Обрати, який вигляд відкривати при запуску: місяць, тиждень або день</string>
 </resources>

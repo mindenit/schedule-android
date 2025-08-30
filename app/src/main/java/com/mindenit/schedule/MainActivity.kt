@@ -10,19 +10,35 @@ import androidx.navigation.ui.setupWithNavController
 import com.mindenit.schedule.databinding.ActivityMainBinding
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.preference.PreferenceManager
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.view.WindowCompat
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply saved theme before view inflation
+        applySavedTheme()
         super.onCreate(savedInstanceState)
+
+        // Opt into edge-to-edge so we can handle insets ourselves
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         // Set MaterialToolbar as ActionBar for Material 3 NoActionBar theme
         setSupportActionBar(binding.toolbar)
+
+        // Apply status bar inset to toolbar to avoid overlap under system bar
+        val toolbarBaseTop = binding.toolbar.paddingTop
+        ViewCompat.setOnApplyWindowInsetsListener(binding.toolbar) { v, insets ->
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            v.setPadding(v.paddingLeft, toolbarBaseTop + status.top, v.paddingRight, v.paddingBottom)
+            insets
+        }
 
         val navView: BottomNavigationView = binding.navView
 
@@ -44,6 +60,17 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+    }
+
+    private fun applySavedTheme() {
+        val sp = PreferenceManager.getDefaultSharedPreferences(this)
+        val mode = sp.getString("pref_theme", "system")
+        val nightMode = when (mode) {
+            "light" -> AppCompatDelegate.MODE_NIGHT_NO
+            "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        AppCompatDelegate.setDefaultNightMode(nightMode)
     }
 
     override fun onSupportNavigateUp(): Boolean {

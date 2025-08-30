@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="pref_theme_entries">
+        <item>Системна</item>
+        <item>Світла</item>
+        <item>Темна</item>
+    </string-array>
+    <string-array name="pref_theme_values">
+        <item>system</item>
+        <item>light</item>
+        <item>dark</item>
+    </string-array>
+
+    <string-array name="pref_default_view_entries">
+        <item>@string/view_month</item>
+        <item>@string/view_week</item>
+        <item>@string/view_day</item>
+    </string-array>
+    <string-array name="pref_default_view_values">
+        <item>month</item>
+        <item>week</item>
+        <item>day</item>
+    </string-array>
+</resources>
