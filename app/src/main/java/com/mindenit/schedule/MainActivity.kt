@@ -1,6 +1,7 @@
 package com.mindenit.schedule
 
 import android.os.Bundle
+import android.os.Build
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
@@ -13,6 +14,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
+import com.google.android.material.color.DynamicColors
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,6 +23,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Apply saved theme before view inflation
         applySavedTheme()
+
+        // Enable dynamic (Monet) colors on Android 13+ only; older keep fallback palette
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            DynamicColors.applyToActivityIfAvailable(this)
+        }
+
         super.onCreate(savedInstanceState)
 
         // Opt into edge-to-edge so we can handle insets ourselves

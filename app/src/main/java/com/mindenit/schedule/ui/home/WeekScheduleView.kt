@@ -43,14 +43,16 @@ class WeekScheduleView @JvmOverloads constructor(
     private val hourHeightDp = 56f
     private val headerHeightDp = 44f
     private val timeColWidthDp = 56f
-    private val dayWidthDp = 120f // fixed per-day width for horizontal scroll
     private val hourLineWidth = 1f
 
     private val density = resources.displayMetrics.density
     private val hourHeightPx = (hourHeightDp * density)
     private val headerHeightPx = (headerHeightDp * density)
     private val timeColWidthPx = (timeColWidthDp * density)
-    private val dayWidthPx = (dayWidthDp * density)
+
+    // Time window (in minutes from 00:00)
+    private val startMinutes = 7 * 60 + 30 // 07:30
+    private val endMinutes = 18 * 60 + 30  // 18:30
 
     // Paints
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -98,8 +100,8 @@ class WeekScheduleView @JvmOverloads constructor(
     private val tmpRect = RectF()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (headerHeightPx + 24f * hourHeightPx).toInt()
-        val desiredWidth = (timeColWidthPx + 7f * dayWidthPx).toInt()
+        val desiredHours = (endMinutes - startMinutes) / 60f // 11h
+        val desiredHeight = (headerHeightPx + desiredHours * hourHeightPx).toInt()
         val widthMode = MeasureSpec.getMode(widthMeasureSpec)
         val heightMode = MeasureSpec.getMode(heightMeasureSpec)
         val widthSize = MeasureSpec.getSize(widthMeasureSpec)
@@ -107,8 +109,8 @@ class WeekScheduleView @JvmOverloads constructor(
 
         val width = when (widthMode) {
             MeasureSpec.EXACTLY -> widthSize
-            MeasureSpec.AT_MOST -> max(desiredWidth, suggestedMinimumWidth)
-            else -> desiredWidth
+            MeasureSpec.AT_MOST -> widthSize
+            else -> widthSize
         }
         val height = when (heightMode) {
             MeasureSpec.EXACTLY -> heightSize
@@ -124,14 +126,18 @@ class WeekScheduleView @JvmOverloads constructor(
 
         val gridLeft = timeColWidthPx
         val gridTop = headerHeightPx
-        val gridRight = timeColWidthPx + 7f * dayWidthPx
+        val dayWidth = ((width.toFloat() - timeColWidthPx) / 7f).coerceAtLeast(0f)
+        val gridRight = timeColWidthPx + 7f * dayWidth
         val gridBottom = h
+
+        val minutePx = hourHeightPx / 60f
+        fun minuteToY(min: Int): Float = gridTop + (min - startMinutes) * minutePx
 
         // Background: shade weekends and highlight today (below header)
         val today = LocalDate.now()
         for (i in 0 until 7) {
-            val x0 = gridLeft + i * dayWidthPx
-            val x1 = x0 + dayWidthPx
+            val x0 = gridLeft + i * dayWidth
+            val x1 = x0 + dayWidth
             val dayDate = startOfWeek.plusDays(i.toLong())
             if (dayDate.dayOfWeek == DayOfWeek.SATURDAY || dayDate.dayOfWeek == DayOfWeek.SUNDAY) {
                 tmpRect.set(x0, gridTop, x1, gridBottom)
@@ -147,56 +153,71 @@ class WeekScheduleView @JvmOverloads constructor(
         for (i in 0 until 7) {
             val dayDate = startOfWeek.plusDays(i.toLong())
             val label = dayDate.format(dayFormatter).uppercase()
-            val x = gridLeft + i * dayWidthPx + dayWidthPx / 2f
+            val x = gridLeft + i * dayWidth + dayWidth / 2f
             val y = headerHeightPx / 2f + headerTextPaint.textSize / 2f
             val paint = if (dayDate == today) headerTodayTextPaint else headerTextPaint
             drawCenteredText(canvas, label, x, y, paint)
         }
 
-        // Time labels and hour/half-hour lines
-        for (hour in 0..24) {
-            val y = gridTop + hour * hourHeightPx
-            // hour line across all day columns
+        // Time labels and hour/half-hour lines within [07:30, 18:30]
+        val firstHour = kotlin.math.ceil(startMinutes / 60f).toInt() // 8
+        val lastHour = endMinutes / 60 // 18
+        // Draw top boundary half-hour at 07:30
+        val topHalfY = minuteToY(startMinutes)
+        canvas.drawLine(gridLeft, topHalfY, gridRight, topHalfY, halfHourPaint)
+
+        for (hour in firstHour..lastHour) {
+            val y = minuteToY(hour * 60)
             canvas.drawLine(gridLeft, y, gridRight, y, gridPaint)
-            if (hour < 24) {
-                val halfY = y + hourHeightPx / 2f
+            val isLastHour = hour == lastHour
+            if (!isLastHour) {
+                val halfY = minuteToY(hour * 60 + 30)
                 canvas.drawLine(gridLeft, halfY, gridRight, halfY, halfHourPaint)
-                val label = String.format(Locale.getDefault(), "%02d:00", hour)
-                val tx = timeColWidthPx - 6f * density
-                val ty = y + headerTextPaint.textSize
-                canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
+            } else {
+                // Bottom boundary half-hour at 18:30
+                val bottomHalfY = minuteToY(endMinutes)
+                canvas.drawLine(gridLeft, bottomHalfY, gridRight, bottomHalfY, halfHourPaint)
             }
+            val label = String.format(Locale.getDefault(), "%02d:00", hour)
+            val tx = timeColWidthPx - 6f * density
+            val ty = y + headerTextPaint.textSize
+            canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
         }
 
         // Vertical day dividers
         for (i in 0..7) {
-            val x = gridLeft + i * dayWidthPx
+            val x = gridLeft + i * dayWidth
             canvas.drawLine(x, gridTop, x, gridBottom, gridPaint)
         }
 
-        // Now line for current day/time
+        // Now line for current day/time (only if within visible window)
         if (!today.isBefore(startOfWeek) && !today.isAfter(startOfWeek.plusDays(6))) {
             val now = LocalTime.now()
             val minutes = now.hour * 60 + now.minute
-            val y = gridTop + minutes * (hourHeightPx / 60f)
-            val dayIndex = (today.dayOfWeek.value + 6) % 7
-            val x0 = gridLeft + dayIndex * dayWidthPx
-            val x1 = x0 + dayWidthPx
-            canvas.drawLine(x0, y, x1, y, nowLinePaint)
+            if (minutes in startMinutes..endMinutes) {
+                val y = minuteToY(minutes)
+                val dayIndex = (today.dayOfWeek.value + 6) % 7
+                val x0 = gridLeft + dayIndex * dayWidth
+                val x1 = x0 + dayWidth
+                canvas.drawLine(x0, y, x1, y, nowLinePaint)
+            }
         }
 
-        // Draw events
-        val minutePx = hourHeightPx / 60f
+        // Draw events (clamped to visible window)
         for (event in events) {
             val dayIndex = ((event.start.toLocalDate().dayOfWeek.value + 6) % 7)
             if (dayIndex !in 0..6) continue
-            val columnLeft = gridLeft + dayIndex * dayWidthPx
-            val columnRight = columnLeft + dayWidthPx
+            val columnLeft = gridLeft + dayIndex * dayWidth
+            val columnRight = columnLeft + dayWidth
 
-            val startMinutes = minutesSinceStartOfDay(event.start)
-            val endMinutes = minutesSinceStartOfDay(event.end)
-            val top = gridTop + startMinutes * minutePx
-            val bottom = gridTop + endMinutes * minutePx
+            val startMin = minutesSinceStartOfDay(event.start)
+            val endMin = minutesSinceStartOfDay(event.end)
+            val topMin = startMin.coerceAtLeast(startMinutes)
+            val bottomMin = endMin.coerceAtMost(endMinutes)
+            if (bottomMin <= startMinutes || topMin >= endMinutes) continue
+
+            val top = minuteToY(topMin)
+            val bottom = minuteToY(bottomMin)
 
             val bgColor = event.color ?: MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer)
             eventPaint.color = bgColor
@@ -242,15 +263,16 @@ class WeekScheduleView @JvmOverloads constructor(
     }
 
     fun getScrollXForDate(date: LocalDate): Int {
-        val idx = (date.dayOfWeek.value + 6) % 7 // Monday=0
-        return (timeColWidthPx + idx * dayWidthPx).toInt()
+        // With dynamic width and no horizontal scroll container, this is 0
+        return 0
     }
 
-    fun getContentWidth(): Int = (timeColWidthPx + 7f * dayWidthPx).toInt()
+    fun getContentWidth(): Int = width
 
     fun getScrollYForTime(time: LocalTime): Int {
         val minutes = time.hour * 60 + time.minute
-        val y = headerHeightPx + minutes * (hourHeightPx / 60f)
+        val minutesInWindow = (minutes - startMinutes).coerceIn(0, endMinutes - startMinutes)
+        val y = headerHeightPx + minutesInWindow * (hourHeightPx / 60f)
         return y.toInt()
     }
 }
