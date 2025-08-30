@@ -15,10 +15,17 @@ import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
 import com.google.android.material.color.DynamicColors
+import android.util.Log
+import androidx.lifecycle.lifecycleScope
+import com.mindenit.schedule.data.Repository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private val repo by lazy { Repository() }
+    private val tag = "MainActivity"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Apply saved theme before view inflation
@@ -68,6 +75,37 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        // Kick off test requests on startup to verify networking and log responses
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val h = repo.health()
+                Log.d(tag, "Health OK: message=${h.message}, uptime=${h.uptime}")
+            } catch (t: Throwable) {
+                Log.e(tag, "Health request failed: ${t.message}", t)
+            }
+
+            try {
+                val groups = repo.fetchGroups()
+                Log.d(tag, "Fetched groups: ${groups.size}")
+            } catch (t: Throwable) {
+                Log.e(tag, "Groups request failed: ${t.message}", t)
+            }
+
+            try {
+                val teachers = repo.fetchTeachers()
+                Log.d(tag, "Fetched teachers: ${teachers.size}")
+            } catch (t: Throwable) {
+                Log.e(tag, "Teachers request failed: ${t.message}", t)
+            }
+
+            try {
+                val auds = repo.fetchAuditoriums()
+                Log.d(tag, "Fetched auditoriums: ${auds.size}")
+            } catch (t: Throwable) {
+                Log.e(tag, "Auditoriums request failed: ${t.message}", t)
+            }
+        }
     }
 
     private fun applySavedTheme() {

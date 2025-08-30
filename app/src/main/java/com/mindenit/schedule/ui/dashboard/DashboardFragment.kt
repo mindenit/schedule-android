@@ -4,35 +4,63 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
+import androidx.core.view.isGone
+import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.fragment.app.setFragmentResultListener
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.mindenit.schedule.databinding.FragmentDashboardBinding
+import com.mindenit.schedule.data.ScheduleEntry
+import com.mindenit.schedule.data.SchedulesStorage
+import com.mindenit.schedule.ui.dashboard.AddScheduleBottomSheet.Companion.RESULT_PAYLOAD
 
 class DashboardFragment : Fragment() {
 
     private var _binding: FragmentDashboardBinding? = null
-
-    // This property is only valid between onCreateView and
-    // onDestroyView.
     private val binding get() = _binding!!
+
+    private lateinit var storage: SchedulesStorage
+    private lateinit var adapter: SchedulesAdapter
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        val dashboardViewModel =
-            ViewModelProvider(this).get(DashboardViewModel::class.java)
-
         _binding = FragmentDashboardBinding.inflate(inflater, container, false)
-        val root: View = binding.root
+        return binding.root
+    }
 
-        val textView: TextView = binding.textDashboard
-        dashboardViewModel.text.observe(viewLifecycleOwner) {
-            textView.text = it
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        storage = SchedulesStorage(requireContext())
+
+        adapter = SchedulesAdapter()
+        binding.schedulesList.layoutManager = LinearLayoutManager(requireContext())
+        binding.schedulesList.adapter = adapter
+
+        binding.fabAddSchedule.setOnClickListener {
+            AddScheduleBottomSheet().show(parentFragmentManager, "add_schedule")
         }
-        return root
+
+        setFragmentResultListener(AddScheduleBottomSheet.REQUEST_KEY) { _, bundle ->
+            val type = bundle.getString(AddScheduleBottomSheet.RESULT_TYPE) ?: return@setFragmentResultListener
+            val id = bundle.getLong(AddScheduleBottomSheet.RESULT_ID)
+            val name = bundle.getString(AddScheduleBottomSheet.RESULT_NAME) ?: return@setFragmentResultListener
+            val payload = bundle.getString(RESULT_PAYLOAD)
+            val entry = ScheduleEntry.from(type, id, name, payload)
+            storage.add(entry)
+            refresh()
+        }
+
+        refresh()
+    }
+
+    private fun refresh() {
+        val items = storage.getAll()
+        adapter.submitList(items)
+        binding.emptyText.isVisible = items.isEmpty()
+        binding.schedulesList.isGone = items.isEmpty()
     }
 
     override fun onDestroyView() {

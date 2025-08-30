@@ -19,4 +19,12 @@
     <string name="pref_theme_summary">Використовувати системну, світлу або темну тему</string>
     <string name="settings_default_view_title">Режим перегляду за замовчуванням</string>
     <string name="settings_default_view_summary">Обрати, який вигляд відкривати при запуску: місяць, тиждень або день</string>
+    <string name="add">Додати</string>
+    <string name="schedules_empty">Додайте розклади за допомогою кнопки +</string>
+    <string name="tab_groups">Групи</string>
+    <string name="tab_teachers">Викладачі</string>
+    <string name="tab_auditoriums">Аудиторії</string>
+    <string name="loading">Завантаження…</string>
+    <string name="error_loading">Помилка завантаження</string>
+    <string name="search_hint">Пошук</string>
 </resources>
