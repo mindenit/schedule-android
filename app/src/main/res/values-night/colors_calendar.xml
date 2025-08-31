@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark theme calendar palette -->
+    <color name="calendar_background">#FF000000</color>
+    <color name="calendar_on_background">#FFFFFFFF</color>
+</resources>
+

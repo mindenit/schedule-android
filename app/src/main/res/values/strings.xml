@@ -25,6 +25,7 @@
     <string name="tab_teachers">Викладачі</string>
     <string name="tab_auditoriums">Аудиторії</string>
     <string name="loading">Завантаження…</string>
+    <string name="loading_calendar">Завантаження календаря…</string>
     <string name="error_loading">Помилка завантаження</string>
     <string name="search_hint">Пошук</string>
     <string name="settings_clear_all">Очистити всі дані</string>

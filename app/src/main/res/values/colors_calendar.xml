@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light theme calendar palette -->
+    <color name="calendar_background">#FFFFFFFF</color>
+    <color name="calendar_on_background">#FF000000</color>
+</resources>
+

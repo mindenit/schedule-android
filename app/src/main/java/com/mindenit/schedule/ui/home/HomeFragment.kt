@@ -1,9 +1,8 @@
 package com.mindenit.schedule.ui.home
 
 import android.os.Bundle
+import android.util.Log
 import android.view.*
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.AnimationUtils
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
@@ -13,16 +12,14 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
-import androidx.navigation.fragment.findNavController
-import androidx.recyclerview.widget.GridLayoutManager
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.mindenit.schedule.R
 import com.mindenit.schedule.databinding.FragmentHomeBinding
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.YearMonth
 import java.time.temporal.TemporalAdjusters
+import java.time.temporal.ChronoUnit
 import androidx.preference.PreferenceManager
 import com.mindenit.schedule.data.SchedulesStorage
 
@@ -31,18 +28,26 @@ class HomeFragment : Fragment() {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var adapter: MonthAdapter
-    private var rowsCount: Int = 6
+    // Month pager adapter/state
+    private var monthPagerAdapter: MonthPagerAdapter? = null
+    private var pagerInitialised = false
+    private var pagerBaseYearMonth: YearMonth? = null
+
+    // Week pager adapter/state
+    private var weekPagerAdapter: WeekPagerAdapter? = null
+    private var weekPagerInitialised = false
+    private var pagerBaseStartOfWeek: LocalDate? = null
+
+    // Day pager adapter/state
+    private var dayPagerAdapter: DayPagerAdapter? = null
+    private var dayPagerInitialised = false
+    private var pagerBaseDate: LocalDate? = null
+
     private var selectedYearMonth: YearMonth = YearMonth.now()
     private var selectedDate: LocalDate = LocalDate.now()
 
     private enum class ViewMode { MONTH, WEEK, DAY }
     private var viewMode: ViewMode = ViewMode.MONTH
-
-    // Animation flags
-    private var isMonthAnimating = false
-    private var isDayAnimating = false
-    private var isWeekAnimating = false
 
     // Simple in-fragment back stack to remember previous view and selection
     private data class ViewState(val mode: ViewMode, val ym: YearMonth, val date: LocalDate)
@@ -50,13 +55,61 @@ class HomeFragment : Fragment() {
 
     private var hasActiveSchedule: Boolean = false
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        _binding = FragmentHomeBinding.inflate(inflater, container, false)
-        return binding.root
+    // Cache frequently used objects to reduce allocations
+    private var cachedMenuProvider: MenuProvider? = null
+    private var cachedPageChangeCallbacks = mutableMapOf<ViewMode, androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback>()
+
+    // Optimize repeated calculations
+    private var lastScheduleCheckTime = 0L
+    private val scheduleCheckInterval = 500L // Check every 500ms max
+
+    // Cache PreferenceManager to avoid repeated lookups
+    private var cachedPreferences: android.content.SharedPreferences? = null
+
+    // Lazy loading state management
+    private var isCalendarLoading = false
+    private var loadingStartTime = 0L
+    private val minimumLoadingTime = 300L // Minimum loading time for smooth UX
+
+    // Loading states
+    private enum class LoadingState { LOADING, LOADED, ERROR }
+    private var currentLoadingState = LoadingState.LOADING
+
+    // Add state keys for saving/restoring fragment state
+    companion object {
+        private const val KEY_VIEW_MODE = "view_mode"
+        private const val KEY_SELECTED_YEAR = "selected_year"
+        private const val KEY_SELECTED_MONTH = "selected_month"
+        private const val KEY_SELECTED_DATE = "selected_date"
+        private const val KEY_HAS_ACTIVE_SCHEDULE = "has_active_schedule"
+    }
+
+    private val logTag = "HomeFragment"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Restore state if available
+        savedInstanceState?.let { bundle ->
+            viewMode = ViewMode.valueOf(bundle.getString(KEY_VIEW_MODE, ViewMode.MONTH.name))
+            val year = bundle.getInt(KEY_SELECTED_YEAR, LocalDate.now().year)
+            val month = bundle.getInt(KEY_SELECTED_MONTH, LocalDate.now().monthValue)
+            selectedYearMonth = YearMonth.of(year, month)
+            val dateString = bundle.getString(KEY_SELECTED_DATE)
+            if (dateString != null) {
+                selectedDate = LocalDate.parse(dateString)
+            }
+            hasActiveSchedule = bundle.getBoolean(KEY_HAS_ACTIVE_SCHEDULE, false)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(KEY_VIEW_MODE, viewMode.name)
+        outState.putInt(KEY_SELECTED_YEAR, selectedYearMonth.year)
+        outState.putInt(KEY_SELECTED_MONTH, selectedYearMonth.monthValue)
+        outState.putString(KEY_SELECTED_DATE, selectedDate.toString())
+        outState.putBoolean(KEY_HAS_ACTIVE_SCHEDULE, hasActiveSchedule)
     }
 
     // Navigate between modes and optionally push current state
@@ -65,45 +118,26 @@ class HomeFragment : Fragment() {
             setTitleForMode()
             return
         }
+
+        // Show loading when switching modes for better UX
+        if (hasActiveSchedule) {
+            when (newMode) {
+                ViewMode.MONTH -> if (!pagerInitialised) showLoadingState()
+                ViewMode.WEEK -> if (!weekPagerInitialised) showLoadingState()
+                ViewMode.DAY -> if (!dayPagerInitialised) showLoadingState()
+            }
+        }
+
         if (push) backStack.addLast(ViewState(viewMode, selectedYearMonth, selectedDate))
         viewMode = newMode
         renderCurrentMode()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        Log.d(logTag, "onViewCreated: start")
         super.onViewCreated(view, savedInstanceState)
 
-        // Setup Recycler
-        adapter = MonthAdapter(emptyList()) { clickedDate ->
-            selectedDate = clickedDate
-            // From month grid to specific day
-            goToMode(ViewMode.DAY)
-        }
-        binding.calendarGrid.layoutManager = GridLayoutManager(requireContext(), 7)
-        binding.calendarGrid.setHasFixedSize(true)
-        binding.calendarGrid.adapter = adapter
-
-        // Attach swipe helpers instead of custom detectors
-        SwipeGestureHelper(
-            view = binding.calendarGrid,
-            condition = { viewMode == ViewMode.MONTH && !isMonthAnimating },
-            onSwipeLeft = { switchMonthAnimated(next = true) },
-            onSwipeRight = { switchMonthAnimated(next = false) }
-        )
-        SwipeGestureHelper(
-            view = binding.dayView,
-            condition = { viewMode == ViewMode.DAY && !isDayAnimating },
-            onSwipeLeft = { switchDayAnimated(next = true) },
-            onSwipeRight = { switchDayAnimated(next = false) }
-        )
-        SwipeGestureHelper(
-            view = binding.weekView,
-            condition = { viewMode == ViewMode.WEEK && !isWeekAnimating },
-            onSwipeLeft = { switchWeekAnimated(next = true) },
-            onSwipeRight = { switchWeekAnimated(next = false) }
-        )
-
-        // Handle system Back with smart stack: pop previous view if present; else ensure Month; else default
+        // Handle system Back with smart stack
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (backStack.isNotEmpty()) {
@@ -116,7 +150,6 @@ class HomeFragment : Fragment() {
                 if (viewMode != ViewMode.MONTH) {
                     goToMode(ViewMode.MONTH, push = false)
                 } else {
-                    // Let system handle
                     isEnabled = false
                     requireActivity().onBackPressedDispatcher.onBackPressed()
                 }
@@ -140,8 +173,10 @@ class HomeFragment : Fragment() {
             navBar?.selectedItemId = R.id.navigation_dashboard
         }
 
-        // Initial render and title (only if active schedule exists)
-        if (hasActiveSchedule) renderCurrentMode() else setTitleForMode()
+        // Initial render and title
+        renderCurrentMode()
+        Log.d(logTag, "onViewCreated: render done for mode=$viewMode")
+        setTitleForMode()
 
         // Menu in toolbar (calendar view switcher)
         val menuHost: MenuHost = requireActivity()
@@ -150,173 +185,164 @@ class HomeFragment : Fragment() {
                 menuInflater.inflate(R.menu.menu_home, menu)
             }
             override fun onPrepareMenu(menu: Menu) {
-                // Hide calendar view switcher when no active schedule
                 menu.findItem(R.id.action_calendar_view)?.isVisible = hasActiveSchedule
             }
             override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
                 return when (menuItem.itemId) {
-                    R.id.action_calendar_view -> {
-                        showViewModePopup()
-                        true
-                    }
+                    R.id.action_calendar_view -> { showViewModePopup(); true }
                     else -> false
                 }
             }
         }, viewLifecycleOwner, Lifecycle.State.RESUMED)
     }
 
-    private fun switchMonthAnimated(next: Boolean) {
-        if (isMonthAnimating) return
-        val grid = binding.calendarGrid
-        val width = grid.width.takeIf { it > 0 } ?: run {
-            grid.post { switchMonthAnimated(next) }
-            return
+    private fun setupMonthPagerIfNeeded() {
+        if (pagerInitialised) return
+        Log.d(logTag, "setupMonthPagerIfNeeded: init with base=$selectedYearMonth")
+        val pager = binding.calendarPager
+        pagerBaseYearMonth = selectedYearMonth
+        monthPagerAdapter = MonthPagerAdapter(pagerBaseYearMonth!!) { clickedDate ->
+            selectedDate = clickedDate
+            goToMode(ViewMode.DAY)
         }
-        isMonthAnimating = true
-        val dir = if (next) -1 else 1
-        val outInterpolator = AccelerateInterpolator()
-        val inInterpolator = AnimationUtils.loadInterpolator(requireContext(), android.R.interpolator.fast_out_slow_in)
-        val outDuration = 100L
-        val inDuration = 160L
+        pager.adapter = monthPagerAdapter
+        pager.offscreenPageLimit = 2 // pre-render neighbors for smooth drag
+        pager.setCurrentItem(MonthPagerAdapter.START_INDEX, false)
 
-        grid.animate().cancel()
-        grid.animate()
-            .translationX((dir * width).toFloat())
-            .alpha(0f)
-            .setDuration(outDuration)
-            .setInterpolator(outInterpolator)
-            .withEndAction {
-                // Update data to new month
-                selectedYearMonth = if (next) selectedYearMonth.plusMonths(1) else selectedYearMonth.minusMonths(1)
-                val days = generateMonthGrid(selectedYearMonth)
-                applyData(days, spanCount = 7, rows = rowsCount)
+        pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                // Update selected month and toolbar title relative to pager base
+                val base = pagerBaseYearMonth ?: selectedYearMonth
+                val diff = position - MonthPagerAdapter.START_INDEX
+                selectedYearMonth = base.plusMonths(diff.toLong())
                 setTitleForMode()
-
-                // Prepare starting position off-screen opposite side
-                grid.translationX = (-dir * width).toFloat()
-                grid.alpha = 0f
-
-                // Animate new month in
-                grid.animate().cancel()
-                grid.animate()
-                    .translationX(0f)
-                    .alpha(1f)
-                    .setDuration(inDuration)
-                    .setInterpolator(inInterpolator)
-                    .withEndAction {
-                        isMonthAnimating = false
-                    }
-                    .start()
             }
-            .start()
+        })
+        pagerInitialised = true
     }
 
-    private fun switchDayAnimated(next: Boolean) {
-        if (isDayAnimating) return
-        val dayView = binding.dayView
-        val width = dayView.width.takeIf { it > 0 } ?: run {
-            dayView.post { switchDayAnimated(next) }
-            return
-        }
-        isDayAnimating = true
-        val dir = if (next) -1 else 1
-        val outInterpolator = AccelerateInterpolator()
-        val inInterpolator = AnimationUtils.loadInterpolator(requireContext(), android.R.interpolator.fast_out_slow_in)
-        val outDuration = 90L
-        val inDuration = 150L
-
-        dayView.animate().cancel()
-        dayView.animate()
-            .translationX((dir * width).toFloat())
-            .alpha(0f)
-            .setDuration(outDuration)
-            .setInterpolator(outInterpolator)
-            .withEndAction {
-                // Update date and data
-                selectedDate = if (next) selectedDate.plusDays(1) else selectedDate.minusDays(1)
-                binding.dayView.setDay(selectedDate, emptyList())
+    private fun setupWeekPagerIfNeeded() {
+        if (weekPagerInitialised) return
+        Log.d(logTag, "setupWeekPagerIfNeeded: init with startOfWeek=${'$'}{selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))}")
+        val pager = binding.weekPager
+        val startOfWeek = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        pagerBaseStartOfWeek = startOfWeek
+        weekPagerAdapter = WeekPagerAdapter(startOfWeek)
+        pager.adapter = weekPagerAdapter
+        pager.offscreenPageLimit = 2
+        pager.setCurrentItem(WeekPagerAdapter.START_INDEX, false)
+        pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                val base = pagerBaseStartOfWeek ?: selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                val diff = position - WeekPagerAdapter.START_INDEX
+                val start = base.plusWeeks(diff.toLong())
+                selectedDate = start // snap selection to start of displayed week
                 setTitleForMode()
-
-                // Prepare incoming position
-                dayView.translationX = (-dir * width).toFloat()
-                dayView.alpha = 0f
-
-                // Animate in and scroll to current time
-                dayView.animate().cancel()
-                dayView.animate()
-                    .translationX(0f)
-                    .alpha(1f)
-                    .setDuration(inDuration)
-                    .setInterpolator(inInterpolator)
-                    .withEndAction {
-                        isDayAnimating = false
-                        binding.dayScroll.post {
-                            val nowY = binding.dayView.getScrollYForTime(LocalTime.now())
-                            binding.dayScroll.scrollTo(0, nowY)
-                        }
-                    }
-                    .start()
             }
-            .start()
+        })
+        weekPagerInitialised = true
     }
 
-    private fun switchWeekAnimated(next: Boolean) {
-        if (isWeekAnimating) return
-        val weekView = binding.weekView
-        val width = weekView.width.takeIf { it > 0 } ?: run {
-            weekView.post { switchWeekAnimated(next) }
-            return
-        }
-        isWeekAnimating = true
-        val dir = if (next) -1 else 1
-        val outInterpolator = AccelerateInterpolator()
-        val inInterpolator = AnimationUtils.loadInterpolator(requireContext(), android.R.interpolator.fast_out_slow_in)
-        val outDuration = 100L
-        val inDuration = 160L
-
-        weekView.animate().cancel()
-        weekView.animate()
-            .translationX((dir * width).toFloat())
-            .alpha(0f)
-            .setDuration(outDuration)
-            .setInterpolator(outInterpolator)
-            .withEndAction {
-                // Update selectedDate by a week and refresh week view
-                selectedDate = if (next) selectedDate.plusDays(7) else selectedDate.minusDays(7)
-                val startOfWeek = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                weekView.setWeek(startOfWeek, emptyList())
-                setTitleForMode() // remains empty for week
-
-                // Prepare incoming position
-                weekView.translationX = (-dir * width).toFloat()
-                weekView.alpha = 0f
-
-                weekView.animate().cancel()
-                weekView.animate()
-                    .translationX(0f)
-                    .alpha(1f)
-                    .setDuration(inDuration)
-                    .setInterpolator(inInterpolator)
-                    .withEndAction {
-                        isWeekAnimating = false
-                        // Keep vertical scroll around current time after switch
-                        binding.weekScroll.post {
-                            val nowY = binding.weekView.getScrollYForTime(LocalTime.now())
-                            binding.weekScroll.scrollTo(0, nowY)
-                        }
-                    }
-                    .start()
+    private fun setupDayPagerIfNeeded() {
+        if (dayPagerInitialised) return
+        Log.d(logTag, "setupDayPagerIfNeeded: init with baseDate=$selectedDate")
+        val pager = binding.dayPager
+        pagerBaseDate = selectedDate
+        dayPagerAdapter = DayPagerAdapter(pagerBaseDate!!)
+        pager.adapter = dayPagerAdapter
+        pager.offscreenPageLimit = 2
+        pager.setCurrentItem(DayPagerAdapter.START_INDEX, false)
+        pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                val base = pagerBaseDate ?: selectedDate
+                val diff = position - DayPagerAdapter.START_INDEX
+                selectedDate = base.plusDays(diff.toLong())
+                setTitleForMode()
             }
-            .start()
+        })
+        dayPagerInitialised = true
     }
 
     override fun onResume() {
         super.onResume()
+        Log.d(logTag, "onResume: binding=${_binding != null}")
+
+        // Only proceed if view is created and binding is available
+        if (_binding == null) {
+            return
+        }
+
         // Re-evaluate active schedule on return to this screen
+        val previousActiveState = hasActiveSchedule
         updateActiveState()
-        if (hasActiveSchedule) renderCurrentMode() else setTitleForMode()
+
+        // Only force refresh if active state changed or adapters are missing
+        val needsRefresh = hasActiveSchedule != previousActiveState ||
+                          (viewMode == ViewMode.MONTH && monthPagerAdapter == null) ||
+                          (viewMode == ViewMode.WEEK && weekPagerAdapter == null) ||
+                          (viewMode == ViewMode.DAY && dayPagerAdapter == null)
+
+        if (needsRefresh) {
+            Log.d(logTag, "onResume: forcing refresh due to state change or missing adapter")
+            forceRefreshCurrentMode()
+        } else {
+            Log.d(logTag, "onResume: skipping refresh, adapters are ready")
+            setTitleForMode()
+        }
+
         // Ask Activity to refresh menu visibility
         (activity as? AppCompatActivity)?.invalidateOptionsMenu()
+        Log.d(logTag, "onResume: refreshed mode=$viewMode hasActiveSchedule=$hasActiveSchedule")
+    }
+
+    // Optimized force refresh to avoid unnecessary re-creation
+    private fun forceRefreshCurrentMode() {
+        when (viewMode) {
+            ViewMode.MONTH -> {
+                if (monthPagerAdapter == null || !pagerInitialised) {
+                    pagerInitialised = false
+                    setupMonthPagerIfNeeded()
+                } else {
+                    // Just ensure correct position without notifyDataSetChanged
+                    val base = pagerBaseYearMonth ?: selectedYearMonth
+                    val diff = getOptimizedMonthIndex(selectedYearMonth) - getOptimizedMonthIndex(base)
+                    val target = MonthPagerAdapter.START_INDEX + diff
+                    if (binding.calendarPager.currentItem != target) {
+                        binding.calendarPager.setCurrentItem(target, false)
+                      }
+                }
+            }
+            ViewMode.WEEK -> {
+                if (weekPagerAdapter == null || !weekPagerInitialised) {
+                    weekPagerInitialised = false
+                    setupWeekPagerIfNeeded()
+                } else {
+                    // Just ensure correct position without notifyDataSetChanged
+                    val base = pagerBaseStartOfWeek ?: selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                    val targetStart = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                    val weeksDiff = ChronoUnit.WEEKS.between(base, targetStart).toInt()
+                    val target = WeekPagerAdapter.START_INDEX + weeksDiff
+                    if (binding.weekPager.currentItem != target) {
+                        binding.weekPager.setCurrentItem(target, false)
+                    }
+                }
+            }
+            ViewMode.DAY -> {
+                if (dayPagerAdapter == null || !dayPagerInitialised) {
+                    dayPagerInitialised = false
+                    setupDayPagerIfNeeded()
+                } else {
+                    // Just ensure correct position without notifyDataSetChanged
+                    val base = pagerBaseDate ?: selectedDate
+                    val daysDiff = ChronoUnit.DAYS.between(base, selectedDate).toInt()
+                    val target = DayPagerAdapter.START_INDEX + daysDiff
+                    if (binding.dayPager.currentItem != target) {
+                        binding.dayPager.setCurrentItem(target, false)
+                    }
+                }
+            }
+        }
+        renderCurrentMode()
     }
 
     private fun setTitleForMode() {
@@ -348,57 +374,58 @@ class HomeFragment : Fragment() {
     }
 
     private fun renderCurrentMode() {
+        Log.d(logTag, "renderCurrentMode: mode=$viewMode hasActiveSchedule=$hasActiveSchedule")
+
+        // Always hide empty state during render to avoid overlaying calendar UI
+        binding.emptyState.isGone = true
+
+        // If no active schedule, show empty state instead of loading
         if (!hasActiveSchedule) {
-            // Hide all calendar views and show empty state container
-            binding.calendarGrid.isGone = true
-            binding.weekScroll.isGone = true
-            binding.dayScroll.isGone = true
+            binding.loadingState.isGone = true
             binding.emptyState.isVisible = true
-            setTitleForMode()
             return
         }
+
         when (viewMode) {
             ViewMode.MONTH -> {
-                // Show grid, hide week and day views
-                binding.calendarGrid.isVisible = true
-                binding.weekScroll.isGone = true
-                binding.dayScroll.isGone = true
-                binding.emptyState.isGone = true
+                // Use lazy loading for month view
+                setupMonthPagerWithLoading()
 
-                val days = generateMonthGrid(selectedYearMonth)
-                applyData(days, spanCount = 7, rows = rowsCount)
+                // Position will be set after loading completes
+                if (pagerInitialised) {
+                    val base = pagerBaseYearMonth ?: selectedYearMonth
+                    val diff = getOptimizedMonthIndex(selectedYearMonth) - getOptimizedMonthIndex(base)
+                    val target = MonthPagerAdapter.START_INDEX + diff
+                    if (binding.calendarPager.currentItem != target) {
+                        binding.calendarPager.setCurrentItem(target, false)
+                    }
+                }
             }
             ViewMode.WEEK -> {
-                // Hide grid and day view, show week view
-                binding.calendarGrid.isGone = true
-                binding.dayScroll.isGone = true
-                binding.weekScroll.isVisible = true
-                binding.emptyState.isGone = true
+                // Use lazy loading for week view
+                setupWeekPagerWithLoading()
 
-                val startOfWeek = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                // No fake events: pass empty list
-                binding.weekView.setWeek(startOfWeek, emptyList())
-
-                // Only vertical auto-scroll to current time (no horizontal scroll needed)
-                binding.weekScroll.post {
-                    val nowY = binding.weekView.getScrollYForTime(LocalTime.now())
-                    binding.weekScroll.scrollTo(0, nowY)
+                if (weekPagerInitialised) {
+                    val base = pagerBaseStartOfWeek ?: selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                    val targetStart = selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                    val weeksDiff = ChronoUnit.WEEKS.between(base, targetStart).toInt()
+                    val target = WeekPagerAdapter.START_INDEX + weeksDiff
+                    if (binding.weekPager.currentItem != target) {
+                        binding.weekPager.setCurrentItem(target, false)
+                    }
                 }
             }
             ViewMode.DAY -> {
-                // Hide grid and week view, show day view
-                binding.calendarGrid.isGone = true
-                binding.weekScroll.isGone = true
-                binding.dayScroll.isVisible = true
-                binding.emptyState.isGone = true
+                // Use lazy loading for day view
+                setupDayPagerWithLoading()
 
-                // No fake events: pass empty list
-                binding.dayView.setDay(selectedDate, emptyList())
-
-                // Auto-scroll to current time vertically
-                binding.dayScroll.post {
-                    val nowY = binding.dayView.getScrollYForTime(LocalTime.now())
-                    binding.dayScroll.scrollTo(0, nowY)
+                if (dayPagerInitialised) {
+                    val base = pagerBaseDate ?: selectedDate
+                    val daysDiff = ChronoUnit.DAYS.between(base, selectedDate).toInt()
+                    val target = DayPagerAdapter.START_INDEX + daysDiff
+                    if (binding.dayPager.currentItem != target) {
+                        binding.dayPager.setCurrentItem(target, false)
+                    }
                 }
             }
         }
@@ -406,51 +433,174 @@ class HomeFragment : Fragment() {
     }
 
     private fun updateActiveState() {
-        hasActiveSchedule = SchedulesStorage(requireContext()).getActive() != null
-        // Update empty state content and visibility
-        binding.emptyText.text = getString(R.string.calendar_empty_state)
-        binding.emptyState.isVisible = !hasActiveSchedule
-        if (!hasActiveSchedule) {
-            binding.calendarGrid.isGone = true
-            binding.weekScroll.isGone = true
-            binding.dayScroll.isGone = true
+        // Throttle schedule checks to avoid excessive I/O operations
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastScheduleCheckTime < scheduleCheckInterval) {
+            return // Skip check if called too frequently
+        }
+        lastScheduleCheckTime = currentTime
+
+        val storage = SchedulesStorage(requireContext())
+        hasActiveSchedule = storage.getActive() != null || storage.getAll().isNotEmpty()
+        // Do not toggle UI visibility here; renderCurrentMode controls it
+    }
+
+    // Cache expensive findViewById operations
+    private var cachedNavBar: BottomNavigationView? = null
+    private fun getNavigationBar(): BottomNavigationView? {
+        return cachedNavBar ?: requireActivity().findViewById<BottomNavigationView>(R.id.nav_view).also {
+            cachedNavBar = it
         }
     }
 
-    private fun applyData(days: List<CalendarDay>, spanCount: Int, rows: Int) {
-        rowsCount = rows
-        (binding.calendarGrid.layoutManager as? GridLayoutManager)?.spanCount = spanCount
-        adapter.submit(days)
-        binding.calendarGrid.post {
-            val totalH = binding.calendarGrid.height
-            if (totalH > 0 && rowsCount > 0) {
-                val rowH = totalH / rowsCount
-                adapter.setItemHeight(rowH)
+    // Optimize preference access with caching
+    private fun getPreferences(): android.content.SharedPreferences {
+        return cachedPreferences ?: PreferenceManager.getDefaultSharedPreferences(requireContext()).also {
+            cachedPreferences = it
+        }
+    }
+
+    // Optimize pager positioning with cached calculations
+    private var cachedMonthIndex: Int = -1
+    private var cachedMonthYearMonth: YearMonth? = null
+
+    private fun getOptimizedMonthIndex(ym: YearMonth): Int {
+        return if (cachedMonthYearMonth == ym && cachedMonthIndex != -1) {
+            cachedMonthIndex
+        } else {
+            val index = ym.year * 12 + ym.monthValue
+            cachedMonthIndex = index
+            cachedMonthYearMonth = ym
+            index
+        }
+    }
+    // Lazy loading management methods
+    private fun showLoadingState() {
+        if (isCalendarLoading) return // Already loading
+
+        isCalendarLoading = true
+        loadingStartTime = System.currentTimeMillis()
+        currentLoadingState = LoadingState.LOADING
+
+        Log.d(logTag, "showLoadingState: starting calendar load")
+
+        // Hide all calendar views and show loading
+        binding.weekdayHeader.isGone = true
+        binding.calendarPager.isGone = true
+        binding.weekPager.isGone = true
+        binding.dayPager.isGone = true
+        binding.emptyState.isGone = true
+        binding.loadingState.isVisible = true
+
+        // Start loading animation
+        binding.loadingIndicator.show()
+    }
+
+    private fun hideLoadingState(onComplete: (() -> Unit)? = null) {
+        if (!isCalendarLoading) {
+            onComplete?.invoke()
+            return
+        }
+
+        val loadingDuration = System.currentTimeMillis() - loadingStartTime
+        val remainingTime = minimumLoadingTime - loadingDuration
+
+        if (remainingTime > 0) {
+            // Ensure minimum loading time for smooth UX
+            binding.root.postDelayed({
+                completeLoadingHide(onComplete)
+            }, remainingTime)
+        } else {
+            completeLoadingHide(onComplete)
+        }
+    }
+
+    private fun completeLoadingHide(onComplete: (() -> Unit)?) {
+        Log.d(logTag, "completeLoadingHide: hiding loading state")
+
+        isCalendarLoading = false
+        currentLoadingState = LoadingState.LOADED
+
+        // Hide loading and show calendar
+        binding.loadingState.isGone = true
+        binding.loadingIndicator.hide()
+
+        // Execute completion callback
+        onComplete?.invoke()
+    }
+
+    // Enhanced setup methods with lazy loading
+    private fun setupMonthPagerWithLoading() {
+        if (pagerInitialised) {
+            hideLoadingState()
+            return
+        }
+
+        showLoadingState()
+
+        // Simulate async loading (in real app this would be data fetching)
+        binding.root.postDelayed({
+            setupMonthPagerIfNeeded()
+            hideLoadingState {
+                // Show calendar after loading completes
+                binding.weekdayHeader.isVisible = true
+                binding.calendarPager.isVisible = true
+                Log.d(logTag, "Month calendar loaded and displayed")
             }
-        }
+        }, 200) // Small delay to show loading animation
     }
 
-    // Remove fake count usage; always 0 events in month cells unless real data is provided
-    private fun generateMonthGrid(yearMonth: YearMonth): List<CalendarDay> {
-        val firstOfMonth = yearMonth.atDay(1)
-        val lastOfMonth = yearMonth.atEndOfMonth()
-        val start = firstOfMonth.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        val end = lastOfMonth.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
-        val days = mutableListOf<CalendarDay>()
-        var d = start
-        while (!d.isAfter(end)) {
-            val inCurrent = d.month == yearMonth.month
-            val eventCount = 0
-            days += CalendarDay(d, inCurrentMonth = inCurrent, eventCount = eventCount)
-            d = d.plusDays(1)
+    private fun setupWeekPagerWithLoading() {
+        if (weekPagerInitialised) {
+            hideLoadingState()
+            return
         }
-        rowsCount = days.size / 7
-        return days
+
+        showLoadingState()
+
+        binding.root.postDelayed({
+            setupWeekPagerIfNeeded()
+            hideLoadingState {
+                binding.weekPager.isVisible = true
+                Log.d(logTag, "Week calendar loaded and displayed")
+            }
+        }, 150)
     }
 
+    private fun setupDayPagerWithLoading() {
+        if (dayPagerInitialised) {
+            hideLoadingState()
+            return
+        }
+
+        showLoadingState()
+
+        binding.root.postDelayed({
+            setupDayPagerIfNeeded()
+            hideLoadingState {
+                binding.dayPager.isVisible = true
+                Log.d(logTag, "Day calendar loaded and displayed")
+            }
+        }, 100)
+    }
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        _binding = FragmentHomeBinding.inflate(inflater, container, false)
+        return binding.root
+    }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // Clean up adapters and reset flags when view is destroyed
+        monthPagerAdapter = null
+        weekPagerAdapter = null
+        dayPagerAdapter = null
+        pagerInitialised = false
+        weekPagerInitialised = false
+        dayPagerInitialised = false
         _binding = null
     }
 }

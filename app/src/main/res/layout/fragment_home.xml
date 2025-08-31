@@ -6,51 +6,151 @@
     android:layout_height="match_parent"
     tools:context=".ui.home.HomeFragment">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/calendar_grid"
+    <!-- Weekday header -->
+    <LinearLayout
+        android:id="@+id/weekday_header"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:background="@color/calendar_background"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="пн"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="вт"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="ср"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="чт"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="пт"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="сб"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="нд"
+            android:textColor="@color/calendar_on_background"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
+    </LinearLayout>
+
+    <!-- Month pager for interactive swiping between months -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/calendar_pager"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:padding="0dp"
-        android:clipToPadding="false"
+        android:background="@color/calendar_background"
+        app:layout_constraintTop_toBottomOf="@id/weekday_header"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Week pager for interactive swiping between weeks (hidden by default) -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/week_pager"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/calendar_background"
+        android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/week_scroll"
+    <!-- Day pager for interactive swiping between days (hidden by default) -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/day_pager"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:fillViewport="true"
+        android:background="@color/calendar_background"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Loading state with spinning loader -->
+    <LinearLayout
+        android:id="@+id/loading_state"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="32dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.mindenit.schedule.ui.home.WeekScheduleView
-            android:id="@+id/week_view"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-    </androidx.core.widget.NestedScrollView>
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/loading_indicator"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:indeterminate="true"
+            app:indicatorColor="?attr/colorPrimary"
+            app:trackColor="?attr/colorSurfaceVariant"
+            app:trackThickness="4dp"
+            app:indicatorSize="48dp" />
 
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/day_scroll"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:fillViewport="true"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        <TextView
+            android:id="@+id/loading_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/loading_calendar"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <com.mindenit.schedule.ui.home.DayScheduleView
-            android:id="@+id/day_view"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-    </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
 
+    <!-- Empty state -->
     <LinearLayout
         android:id="@+id/empty_state"
         android:layout_width="0dp"
@@ -98,5 +198,6 @@
             android:layout_marginTop="16dp"
             android:text="@string/select_schedule" />
     </LinearLayout>
+
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -12,7 +12,6 @@ import com.google.android.material.color.MaterialColors
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.max
 
@@ -47,7 +46,18 @@ class DayScheduleView @JvmOverloads constructor(
     private val headerHeightPx = (headerHeightDp * density)
     private val timeColWidthPx = (timeColWidthDp * density)
 
-    // Paints
+    // Visible time window (in minutes from 00:00) – match WeekScheduleView
+    private val startMinutes = 7 * 60 + 30 // 07:30
+    private val endMinutes = 18 * 60 + 30  // 18:30
+
+    // Cache for performance optimization
+    private var lastDrawnDate: LocalDate? = null
+    private var cachedToday: LocalDate? = null
+    private var cachedNowY: Float = -1f
+    private var cachedVisibleHours: Float = (endMinutes - startMinutes) / 60f
+    private var cachedDesiredHeight: Int = (headerHeightPx + cachedVisibleHours * hourHeightPx).toInt()
+
+    // Paints with optimized initialization
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
         strokeWidth = hourLineWidth
@@ -75,19 +85,17 @@ class DayScheduleView @JvmOverloads constructor(
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
 
-    private val headerFormatter = DateTimeFormatter.ofPattern("EEEE, d LLLL", Locale.forLanguageTag("uk"))
-
     private val tmpRect = RectF()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (headerHeightPx + 24f * hourHeightPx).toInt()
+        // Use cached height calculation
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val heightMode = MeasureSpec.getMode(heightMeasureSpec)
         val heightSize = MeasureSpec.getSize(heightMeasureSpec)
         val height = when (heightMode) {
             MeasureSpec.EXACTLY -> heightSize
-            MeasureSpec.AT_MOST -> max(desiredHeight, suggestedMinimumHeight)
-            else -> desiredHeight
+            MeasureSpec.AT_MOST -> max(cachedDesiredHeight, suggestedMinimumHeight)
+            else -> cachedDesiredHeight
         }
         setMeasuredDimension(width, height)
     }
@@ -99,38 +107,84 @@ class DayScheduleView @JvmOverloads constructor(
         val gridTop = headerHeightPx
         val gridRight = width.toFloat()
 
-        // Hour grid and time labels
-        for (hour in 0..24) {
-            val y = gridTop + hour * hourHeightPx
+        val minutePx = hourHeightPx / 60f
+        fun minuteToY(min: Int): Float = gridTop + (min - startMinutes) * minutePx
+
+        // Optimize grid drawing - cache hour calculations
+        drawTimeGrid(canvas, gridLeft, gridRight, ::minuteToY)
+
+        // Optimize now line drawing with caching
+        drawNowLine(canvas, gridLeft, gridRight, ::minuteToY)
+
+        // Optimize event drawing
+        drawEvents(canvas, gridLeft, gridRight, ::minuteToY)
+    }
+
+    private fun drawTimeGrid(canvas: Canvas, gridLeft: Float, gridRight: Float, minuteToY: (Int) -> Float) {
+        val firstHour = kotlin.math.ceil(startMinutes / 60f).toInt()
+        val lastHour = endMinutes / 60
+
+        // Top boundary half-hour at 07:30
+        val topHalfY = minuteToY(startMinutes)
+        canvas.drawLine(gridLeft, topHalfY, gridRight, topHalfY, halfHourPaint)
+
+        for (hour in firstHour..lastHour) {
+            val y = minuteToY(hour * 60)
             canvas.drawLine(gridLeft, y, gridRight, y, gridPaint)
-            if (hour < 24) {
-                val halfY = y + hourHeightPx / 2f
+
+            val isLastHour = hour == lastHour
+            if (!isLastHour) {
+                val halfY = minuteToY(hour * 60 + 30)
                 canvas.drawLine(gridLeft, halfY, gridRight, halfY, halfHourPaint)
-                val label = String.format(java.util.Locale.getDefault(), "%02d:00", hour)
-                val tx = timeColWidthPx - 6f * density
-                val ty = y + headerTextPaint.textSize
-                canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
+            } else {
+                // Bottom boundary half-hour at 18:30
+                val bottomHalfY = minuteToY(endMinutes)
+                canvas.drawLine(gridLeft, bottomHalfY, gridRight, bottomHalfY, halfHourPaint)
+            }
+
+            // Draw time labels
+            val label = String.format(java.util.Locale.getDefault(), "%02d:00", hour)
+            val tx = timeColWidthPx - 6f * density
+            val ty = y + headerTextPaint.textSize
+            canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
+        }
+    }
+
+    private fun drawNowLine(canvas: Canvas, gridLeft: Float, gridRight: Float, minuteToY: (Int) -> Float) {
+        // Cache today calculation and now line position
+        val today = cachedToday ?: LocalDate.now().also { cachedToday = it }
+
+        if (date == today) {
+            val now = LocalTime.now()
+            val minutes = now.hour * 60 + now.minute
+            if (minutes in startMinutes..endMinutes) {
+                // Use cached position or calculate new one
+                val y = if (cachedNowY >= 0 && lastDrawnDate == date) {
+                    cachedNowY
+                } else {
+                    minuteToY(minutes).also { cachedNowY = it }
+                }
+                canvas.drawLine(gridLeft, y, gridRight, y, nowLinePaint)
             }
         }
+    }
 
-        // Now line, if same date
-        val today = java.time.LocalDate.now()
-        if (date == today) {
-            val now = java.time.LocalTime.now()
-            val minutes = now.hour * 60 + now.minute
-            val y = gridTop + minutes * (hourHeightPx / 60f)
-            canvas.drawLine(gridLeft, y, gridRight, y, nowLinePaint)
-        }
+    private fun drawEvents(canvas: Canvas, gridLeft: Float, gridRight: Float, minuteToY: (Int) -> Float) {
+        // Only draw if events exist
+        if (events.isEmpty()) return
 
-        // Events
-        val minutePx = hourHeightPx / 60f
         for (event in events) {
-            val startMinutes = minutesSinceStartOfDay(event.start)
-            val endMinutes = minutesSinceStartOfDay(event.end)
-            val top = gridTop + startMinutes * minutePx
-            val bottom = gridTop + endMinutes * minutePx
+            val startMin = minutesSinceStartOfDay(event.start)
+            val endMin = minutesSinceStartOfDay(event.end)
+            val topMin = startMin.coerceAtLeast(startMinutes)
+            val bottomMin = endMin.coerceAtMost(endMinutes)
+            if (bottomMin <= startMinutes || topMin >= endMinutes) continue
 
-            val bgColor = event.color ?: com.google.android.material.color.MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer)
+            val top = minuteToY(topMin)
+            val bottom = minuteToY(bottomMin)
+
+            val bgColor = event.color
+                ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimaryContainer)
             eventPaint.color = bgColor
             tmpRect.set(
                 gridLeft + 8f * density,
@@ -140,13 +194,16 @@ class DayScheduleView @JvmOverloads constructor(
             )
             canvas.drawRoundRect(tmpRect, 8f * density, 8f * density, eventPaint)
 
-            val text = event.title
-            val textX = tmpRect.left + 6f * density
-            val textY = tmpRect.top + eventTextPaint.textSize + 4f * density
-            val save = canvas.save()
-            canvas.clipRect(tmpRect)
-            canvas.drawText(text, textX, textY, eventTextPaint)
-            canvas.restoreToCount(save)
+            // Only draw text if there's enough space
+            if (tmpRect.height() > eventTextPaint.textSize * 1.5f) {
+                val text = event.title
+                val textX = tmpRect.left + 6f * density
+                val textY = tmpRect.top + eventTextPaint.textSize + 4f * density
+                val save = canvas.save()
+                canvas.clipRect(tmpRect)
+                canvas.drawText(text, textX, textY, eventTextPaint)
+                canvas.restoreToCount(save)
+            }
         }
     }
 
@@ -156,15 +213,26 @@ class DayScheduleView @JvmOverloads constructor(
     }
 
     fun setDay(date: LocalDate, events: List<DayEvent>) {
+        val needsRedraw = this.date != date || this.events != events
         this.date = date
         this.events = events.sortedBy { it.start }
-        requestLayout()
-        invalidate()
+
+        // Reset cache when date changes
+        if (lastDrawnDate != date) {
+            cachedNowY = -1f
+            cachedToday = null
+            lastDrawnDate = date
+        }
+
+        if (needsRedraw) {
+            invalidate()
+        }
     }
 
     fun getScrollYForTime(time: LocalTime): Int {
         val minutes = time.hour * 60 + time.minute
-        val y = headerHeightPx + minutes * (hourHeightPx / 60f)
+        val minutesInWindow = (minutes - startMinutes).coerceIn(0, endMinutes - startMinutes)
+        val y = headerHeightPx + minutesInWindow * (hourHeightPx / 60f)
         return y.toInt()
     }
 
