@@ -66,14 +66,32 @@ class HomeFragment : Fragment() {
     // Cache PreferenceManager to avoid repeated lookups
     private var cachedPreferences: android.content.SharedPreferences? = null
 
-    // Lazy loading state management
+    // Enhanced lazy loading state management
     private var isCalendarLoading = false
     private var loadingStartTime = 0L
-    private val minimumLoadingTime = 300L // Minimum loading time for smooth UX
+    private val minimumLoadingTime = 200L // Reduced minimum loading time
+    private val maxLoadingTime = 1500L // Maximum loading time before timeout
 
-    // Loading states
-    private enum class LoadingState { LOADING, LOADED, ERROR }
-    private var currentLoadingState = LoadingState.LOADING
+    // Loading states with progress tracking
+    private enum class LoadingState { IDLE, LOADING, LOADED, ERROR, TIMEOUT }
+    private var currentLoadingState = LoadingState.IDLE
+
+    // Progress tracking for smoother UX
+    private var loadingProgress = 0f
+    private val loadingSteps = arrayOf(
+        R.string.loading_calendar_preparing,
+        R.string.loading_calendar_events,
+        R.string.loading_calendar_ready
+    )
+    private var currentLoadingStep = 0
+
+    // Animation handlers for smooth transitions
+    private val fadeInDuration = 150L
+    private val fadeOutDuration = 100L
+
+    // Preloading optimization
+    private var isPreloadingEnabled = true
+    private val preloadedViews = mutableSetOf<ViewMode>()
 
     // Add state keys for saving/restoring fragment state
     companion object {
@@ -474,26 +492,38 @@ class HomeFragment : Fragment() {
             index
         }
     }
-    // Lazy loading management methods
+    // Enhanced lazy loading management methods with animations
     private fun showLoadingState() {
         if (isCalendarLoading) return // Already loading
 
         isCalendarLoading = true
         loadingStartTime = System.currentTimeMillis()
         currentLoadingState = LoadingState.LOADING
+        currentLoadingStep = 0
+        loadingProgress = 0f
 
-        Log.d(logTag, "showLoadingState: starting calendar load")
+        Log.d(logTag, "showLoadingState: starting optimized calendar load")
 
-        // Hide all calendar views and show loading
-        binding.weekdayHeader.isGone = true
-        binding.calendarPager.isGone = true
-        binding.weekPager.isGone = true
-        binding.dayPager.isGone = true
-        binding.emptyState.isGone = true
-        binding.loadingState.isVisible = true
+        // Start with fade out animation for smoother transition
+        animateViewsOut {
+            // Hide all calendar views
+            binding.weekdayHeader.isGone = true
+            binding.calendarPager.isGone = true
+            binding.weekPager.isGone = true
+            binding.dayPager.isGone = true
+            binding.emptyState.isGone = true
 
-        // Start loading animation
-        binding.loadingIndicator.show()
+            // Show loading with fade in animation
+            binding.loadingState.alpha = 0f
+            binding.loadingState.isVisible = true
+            binding.loadingState.animate()
+                .alpha(1f)
+                .setDuration(fadeInDuration)
+                .start()
+
+            // Start enhanced loading animation
+            startEnhancedLoadingAnimation()
+        }
     }
 
     private fun hideLoadingState(onComplete: (() -> Unit)? = null) {
@@ -516,72 +546,218 @@ class HomeFragment : Fragment() {
     }
 
     private fun completeLoadingHide(onComplete: (() -> Unit)?) {
-        Log.d(logTag, "completeLoadingHide: hiding loading state")
+        Log.d(logTag, "completeLoadingHide: hiding optimized loading state")
 
         isCalendarLoading = false
         currentLoadingState = LoadingState.LOADED
 
-        // Hide loading and show calendar
-        binding.loadingState.isGone = true
-        binding.loadingIndicator.hide()
+        // Smooth fade out of loading state
+        binding.loadingState.animate()
+            .alpha(0f)
+            .setDuration(fadeOutDuration)
+            .withEndAction {
+                binding.loadingState.isGone = true
+                binding.loadingIndicator.hide()
 
-        // Execute completion callback
-        onComplete?.invoke()
+                // Execute completion callback with calendar reveal animation
+                onComplete?.invoke()
+            }
+            .start()
     }
 
-    // Enhanced setup methods with lazy loading
+    private fun animateViewsOut(onComplete: () -> Unit) {
+        val activeViews = listOfNotNull(
+            binding.weekdayHeader.takeIf { it.isVisible },
+            binding.calendarPager.takeIf { it.isVisible },
+            binding.weekPager.takeIf { it.isVisible },
+            binding.dayPager.takeIf { it.isVisible }
+        )
+
+        if (activeViews.isEmpty()) {
+            onComplete()
+            return
+        }
+
+        var animationsCompleted = 0
+        activeViews.forEach { view ->
+            view.animate()
+                .alpha(0f)
+                .setDuration(fadeOutDuration)
+                .withEndAction {
+                    animationsCompleted++
+                    if (animationsCompleted == activeViews.size) {
+                        onComplete()
+                    }
+                }
+                .start()
+        }
+    }
+
+    private fun startEnhancedLoadingAnimation() {
+        binding.loadingIndicator.show()
+        updateLoadingStep(0)
+
+        // Simulate progressive loading steps
+        binding.root.postDelayed({ updateLoadingStep(1) }, 100)
+        binding.root.postDelayed({ updateLoadingStep(2) }, 200)
+    }
+
+    private fun updateLoadingStep(step: Int) {
+        if (step >= loadingSteps.size || !isCalendarLoading) return
+
+        currentLoadingStep = step
+        loadingProgress = (step + 1) / loadingSteps.size.toFloat()
+
+        // Update loading text with smooth transition
+        binding.loadingText.animate()
+            .alpha(0f)
+            .setDuration(50)
+            .withEndAction {
+                binding.loadingText.setText(loadingSteps[step])
+                binding.loadingText.animate()
+                    .alpha(1f)
+                    .setDuration(100)
+                    .start()
+            }
+            .start()
+    }
+
+    // Enhanced setup methods with optimized loading and preloading
     private fun setupMonthPagerWithLoading() {
         if (pagerInitialised) {
-            hideLoadingState()
+            // If already initialized, show calendar immediately with smooth transition
+            showCalendarWithAnimation(ViewMode.MONTH)
+            return
+        }
+
+        // Check if we can preload this view
+        if (preloadedViews.contains(ViewMode.MONTH)) {
+            Log.d(logTag, "Using preloaded month view")
+            setupMonthPagerIfNeeded()
+            showCalendarWithAnimation(ViewMode.MONTH)
             return
         }
 
         showLoadingState()
 
-        // Simulate async loading (in real app this would be data fetching)
+        // Optimize loading timing based on view complexity
+        val loadingDelay = if (hasActiveSchedule) 150L else 50L
+
         binding.root.postDelayed({
-            setupMonthPagerIfNeeded()
-            hideLoadingState {
-                // Show calendar after loading completes
-                binding.weekdayHeader.isVisible = true
-                binding.calendarPager.isVisible = true
-                Log.d(logTag, "Month calendar loaded and displayed")
+            if (isCalendarLoading) { // Check if still loading
+                setupMonthPagerIfNeeded()
+                hideLoadingState {
+                    showCalendarWithAnimation(ViewMode.MONTH)
+                    Log.d(logTag, "Month calendar loaded and displayed with animation")
+
+                    // Start preloading other views in background
+                    startBackgroundPreloading()
+                }
             }
-        }, 200) // Small delay to show loading animation
+        }, loadingDelay)
     }
 
     private fun setupWeekPagerWithLoading() {
         if (weekPagerInitialised) {
-            hideLoadingState()
+            showCalendarWithAnimation(ViewMode.WEEK)
+            return
+        }
+
+        if (preloadedViews.contains(ViewMode.WEEK)) {
+            Log.d(logTag, "Using preloaded week view")
+            setupWeekPagerIfNeeded()
+            showCalendarWithAnimation(ViewMode.WEEK)
             return
         }
 
         showLoadingState()
 
         binding.root.postDelayed({
-            setupWeekPagerIfNeeded()
-            hideLoadingState {
-                binding.weekPager.isVisible = true
-                Log.d(logTag, "Week calendar loaded and displayed")
+            if (isCalendarLoading) {
+                setupWeekPagerIfNeeded()
+                hideLoadingState {
+                    showCalendarWithAnimation(ViewMode.WEEK)
+                    Log.d(logTag, "Week calendar loaded and displayed with animation")
+                }
             }
-        }, 150)
+        }, 100)
     }
 
     private fun setupDayPagerWithLoading() {
         if (dayPagerInitialised) {
-            hideLoadingState()
+            showCalendarWithAnimation(ViewMode.DAY)
+            return
+        }
+
+        if (preloadedViews.contains(ViewMode.DAY)) {
+            Log.d(logTag, "Using preloaded day view")
+            setupDayPagerIfNeeded()
+            showCalendarWithAnimation(ViewMode.DAY)
             return
         }
 
         showLoadingState()
 
         binding.root.postDelayed({
-            setupDayPagerIfNeeded()
-            hideLoadingState {
-                binding.dayPager.isVisible = true
-                Log.d(logTag, "Day calendar loaded and displayed")
+            if (isCalendarLoading) {
+                setupDayPagerIfNeeded()
+                hideLoadingState {
+                    showCalendarWithAnimation(ViewMode.DAY)
+                    Log.d(logTag, "Day calendar loaded and displayed with animation")
+                }
             }
-        }, 100)
+        }, 80)
+    }
+
+    private fun showCalendarWithAnimation(mode: ViewMode) {
+        when (mode) {
+            ViewMode.MONTH -> {
+                binding.weekdayHeader.alpha = 0f
+                binding.calendarPager.alpha = 0f
+                binding.weekdayHeader.isVisible = true
+                binding.calendarPager.isVisible = true
+
+                binding.weekdayHeader.animate().alpha(1f).setDuration(fadeInDuration).start()
+                binding.calendarPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+            }
+            ViewMode.WEEK -> {
+                binding.weekPager.alpha = 0f
+                binding.weekPager.isVisible = true
+                binding.weekPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+            }
+            ViewMode.DAY -> {
+                binding.dayPager.alpha = 0f
+                binding.dayPager.isVisible = true
+                binding.dayPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+            }
+        }
+    }
+
+    // Background preloading for better performance
+    private fun startBackgroundPreloading() {
+        if (!isPreloadingEnabled) return
+
+        binding.root.postDelayed({
+            if (!isCalendarLoading && hasActiveSchedule) {
+                Log.d(logTag, "Starting background preloading")
+
+                // Preload week view if not current mode
+                if (viewMode != ViewMode.WEEK && !weekPagerInitialised && !preloadedViews.contains(ViewMode.WEEK)) {
+                    setupWeekPagerIfNeeded()
+                    preloadedViews.add(ViewMode.WEEK)
+                    Log.d(logTag, "Preloaded week view")
+                }
+
+                // Preload day view if not current mode
+                if (viewMode != ViewMode.DAY && !dayPagerInitialised && !preloadedViews.contains(ViewMode.DAY)) {
+                    binding.root.postDelayed({
+                        setupDayPagerIfNeeded()
+                        preloadedViews.add(ViewMode.DAY)
+                        Log.d(logTag, "Preloaded day view")
+                    }, 200)
+                }
+            }
+        }, 500) // Start preloading after main view is settled
     }
     override fun onCreateView(
         inflater: LayoutInflater,

@@ -115,7 +115,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Loading state with spinning loader -->
+    <!-- Enhanced loading state with better visual design -->
     <LinearLayout
         android:id="@+id/loading_state"
         android:layout_width="0dp"
@@ -124,29 +124,46 @@
         android:gravity="center_horizontal"
         android:padding="32dp"
         android:visibility="gone"
+        android:background="?attr/colorSurface"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <!-- Enhanced progress indicator with custom styling -->
         <com.google.android.material.progressindicator.CircularProgressIndicator
             android:id="@+id/loading_indicator"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:indeterminate="true"
             app:indicatorColor="?attr/colorPrimary"
             app:trackColor="?attr/colorSurfaceVariant"
-            app:trackThickness="4dp"
-            app:indicatorSize="48dp" />
+            app:trackThickness="3dp"
+            app:indicatorSize="56dp" />
 
+        <!-- Loading text with better typography -->
         <TextView
             android:id="@+id/loading_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="20dp"
             android:text="@string/loading_calendar"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="?attr/colorOnSurface"
+            android:textStyle="bold"
+            android:alpha="0.87" />
+
+        <!-- Optional subtle loading hint -->
+        <TextView
+            android:id="@+id/loading_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Підготовка календаря для перегляду"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:alpha="0.6"
+            android:gravity="center" />
 
     </LinearLayout>
 
@@ -177,7 +194,7 @@
                 android:layout_height="88dp"
                 android:layout_gravity="center"
                 android:contentDescription="@null"
-                android:tint="?attr/colorOnSecondaryContainer"
+                app:tint="?attr/colorOnSecondaryContainer"
                 android:src="@drawable/ic_sentiment_dissatisfied_24" />
         </FrameLayout>
 
