@@ -69,29 +69,24 @@ class HomeFragment : Fragment() {
     // Enhanced lazy loading state management
     private var isCalendarLoading = false
     private var loadingStartTime = 0L
-    private val minimumLoadingTime = 200L // Reduced minimum loading time
-    private val maxLoadingTime = 1500L // Maximum loading time before timeout
+    private val minimumLoadingTime = 100L // Зменшено з 300L до 100L
+    private val maxLoadingTime = 800L // Зменшено з 1500L до 800L
 
     // Loading states with progress tracking
-    private enum class LoadingState { IDLE, LOADING, LOADED, ERROR, TIMEOUT }
+    private enum class LoadingState { IDLE, LOADING, LOADED }
     private var currentLoadingState = LoadingState.IDLE
 
     // Progress tracking for smoother UX
     private var loadingProgress = 0f
     private val loadingSteps = arrayOf(
         R.string.loading_calendar_preparing,
-        R.string.loading_calendar_events,
         R.string.loading_calendar_ready
     )
     private var currentLoadingStep = 0
 
     // Animation handlers for smooth transitions
-    private val fadeInDuration = 150L
-    private val fadeOutDuration = 100L
-
-    // Preloading optimization
-    private var isPreloadingEnabled = true
-    private val preloadedViews = mutableSetOf<ViewMode>()
+    private val fadeInDuration = 80L // Зменшено з 150L
+    private val fadeOutDuration = 60L // Зменшено з 100L
 
     // Add state keys for saving/restoring fragment state
     companion object {
@@ -315,11 +310,16 @@ class HomeFragment : Fragment() {
 
     // Optimized force refresh to avoid unnecessary re-creation
     private fun forceRefreshCurrentMode() {
+        Log.d(logTag, "forceRefreshCurrentMode: mode=$viewMode hasActiveSchedule=$hasActiveSchedule")
+
         when (viewMode) {
             ViewMode.MONTH -> {
                 if (monthPagerAdapter == null || !pagerInitialised) {
+                    Log.d(logTag, "Month pager missing or not initialized, resetting and using loading")
                     pagerInitialised = false
-                    setupMonthPagerIfNeeded()
+                    monthPagerAdapter = null
+                    // Don't call setupMonthPagerIfNeeded directly, use the loading version
+                    setupMonthPagerWithLoading()
                 } else {
                     // Just ensure correct position without notifyDataSetChanged
                     val base = pagerBaseYearMonth ?: selectedYearMonth
@@ -327,13 +327,15 @@ class HomeFragment : Fragment() {
                     val target = MonthPagerAdapter.START_INDEX + diff
                     if (binding.calendarPager.currentItem != target) {
                         binding.calendarPager.setCurrentItem(target, false)
-                      }
+                    }
                 }
             }
             ViewMode.WEEK -> {
                 if (weekPagerAdapter == null || !weekPagerInitialised) {
+                    Log.d(logTag, "Week pager missing or not initialized, resetting and using loading")
                     weekPagerInitialised = false
-                    setupWeekPagerIfNeeded()
+                    weekPagerAdapter = null
+                    setupWeekPagerWithLoading()
                 } else {
                     // Just ensure correct position without notifyDataSetChanged
                     val base = pagerBaseStartOfWeek ?: selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -347,8 +349,10 @@ class HomeFragment : Fragment() {
             }
             ViewMode.DAY -> {
                 if (dayPagerAdapter == null || !dayPagerInitialised) {
+                    Log.d(logTag, "Day pager missing or not initialized, resetting and using loading")
                     dayPagerInitialised = false
-                    setupDayPagerIfNeeded()
+                    dayPagerAdapter = null
+                    setupDayPagerWithLoading()
                 } else {
                     // Just ensure correct position without notifyDataSetChanged
                     val base = pagerBaseDate ?: selectedDate
@@ -360,7 +364,21 @@ class HomeFragment : Fragment() {
                 }
             }
         }
-        renderCurrentMode()
+
+        // Only call renderCurrentMode if we're not using the loading methods
+        // (loading methods handle their own rendering)
+        if (hasActiveSchedule) {
+            val needsRender = when (viewMode) {
+                ViewMode.MONTH -> pagerInitialised && monthPagerAdapter != null
+                ViewMode.WEEK -> weekPagerInitialised && weekPagerAdapter != null
+                ViewMode.DAY -> dayPagerInitialised && dayPagerAdapter != null
+            }
+            if (needsRender) {
+                renderCurrentMode()
+            }
+        } else {
+            renderCurrentMode()
+        }
     }
 
     private fun setTitleForMode() {
@@ -394,18 +412,28 @@ class HomeFragment : Fragment() {
     private fun renderCurrentMode() {
         Log.d(logTag, "renderCurrentMode: mode=$viewMode hasActiveSchedule=$hasActiveSchedule")
 
-        // Always hide empty state during render to avoid overlaying calendar UI
-        binding.emptyState.isGone = true
-
-        // If no active schedule, show empty state instead of loading
+        // If no active schedule, hide all calendar views and show empty state
         if (!hasActiveSchedule) {
             binding.loadingState.isGone = true
             binding.emptyState.isVisible = true
+
+            // Hide all calendar views to prevent them from showing behind empty state
+            binding.weekdayHeader.isGone = true
+            binding.calendarPager.isGone = true
+            binding.weekPager.isGone = true
+            binding.dayPager.isGone = true
             return
         }
 
+        // Hide empty state when we have active schedule
+        binding.emptyState.isGone = true
+
         when (viewMode) {
             ViewMode.MONTH -> {
+                // Hide other pagers first
+                binding.weekPager.isGone = true
+                binding.dayPager.isGone = true
+
                 // Use lazy loading for month view
                 setupMonthPagerWithLoading()
 
@@ -420,6 +448,11 @@ class HomeFragment : Fragment() {
                 }
             }
             ViewMode.WEEK -> {
+                // Hide other pagers first
+                binding.weekdayHeader.isGone = true
+                binding.calendarPager.isGone = true
+                binding.dayPager.isGone = true
+
                 // Use lazy loading for week view
                 setupWeekPagerWithLoading()
 
@@ -430,10 +463,15 @@ class HomeFragment : Fragment() {
                     val target = WeekPagerAdapter.START_INDEX + weeksDiff
                     if (binding.weekPager.currentItem != target) {
                         binding.weekPager.setCurrentItem(target, false)
-                    }
+                      }
                 }
             }
             ViewMode.DAY -> {
+                // Hide other pagers first
+                binding.weekdayHeader.isGone = true
+                binding.calendarPager.isGone = true
+                binding.weekPager.isGone = true
+
                 // Use lazy loading for day view
                 setupDayPagerWithLoading()
 
@@ -458,9 +496,21 @@ class HomeFragment : Fragment() {
         }
         lastScheduleCheckTime = currentTime
 
+        val previousState = hasActiveSchedule
         val storage = SchedulesStorage(requireContext())
         hasActiveSchedule = storage.getActive() != null || storage.getAll().isNotEmpty()
-        // Do not toggle UI visibility here; renderCurrentMode controls it
+
+        // If state changed from no active schedule to has active schedule,
+        // reset loading flags to ensure proper loading experience
+        if (!previousState && hasActiveSchedule) {
+            Log.d(logTag, "First schedule detected - resetting calendar state for optimal loading")
+            isCalendarLoading = false
+            currentLoadingState = LoadingState.IDLE
+            // Clear preloaded views to ensure fresh setup
+            preloadedViews.clear()
+        }
+
+        Log.d(logTag, "updateActiveState: hasActiveSchedule=$hasActiveSchedule (was $previousState)")
     }
 
     // Cache expensive findViewById operations
@@ -492,38 +542,41 @@ class HomeFragment : Fragment() {
             index
         }
     }
-    // Enhanced lazy loading management methods with animations
-    private fun showLoadingState() {
-        if (isCalendarLoading) return // Already loading
+    // Швидший та простіший лоадер
+    private fun showLoadingState(targetMode: ViewMode? = null) {
+        if (isCalendarLoading && binding.loadingState.isVisible) return
 
         isCalendarLoading = true
         loadingStartTime = System.currentTimeMillis()
         currentLoadingState = LoadingState.LOADING
-        currentLoadingStep = 0
         loadingProgress = 0f
 
-        Log.d(logTag, "showLoadingState: starting optimized calendar load")
+        Log.d(logTag, "showLoadingState: starting fast load for mode=$targetMode")
 
-        // Start with fade out animation for smoother transition
-        animateViewsOut {
-            // Hide all calendar views
-            binding.weekdayHeader.isGone = true
-            binding.calendarPager.isGone = true
-            binding.weekPager.isGone = true
-            binding.dayPager.isGone = true
-            binding.emptyState.isGone = true
+        // Миттєво ховаємо всі календарні view
+        binding.weekdayHeader.isGone = true
+        binding.calendarPager.isGone = true
+        binding.weekPager.isGone = true
+        binding.dayPager.isGone = true
+        binding.emptyState.isGone = true
 
-            // Show loading with fade in animation
-            binding.loadingState.alpha = 0f
-            binding.loadingState.isVisible = true
-            binding.loadingState.animate()
-                .alpha(1f)
-                .setDuration(fadeInDuration)
-                .start()
+        // Швидко показуємо лоадер без складних анімацій
+        binding.loadingState.alpha = 1f
+        binding.loadingState.isVisible = true
+        binding.loadingState.bringToFront()
 
-            // Start enhanced loading animation
-            startEnhancedLoadingAnimation()
-        }
+        // Простіша анімація лоадера
+        binding.loadingIndicator.show()
+        binding.loadingText.setText(loadingSteps[0])
+
+        // Швидший fallback - 400ms ����амість 800ms
+        binding.root.postDelayed({
+            if (isCalendarLoading) {
+                hideLoadingState {
+                    showCalendarWithAnimation(viewMode)
+                }
+            }
+        }, 400)
     }
 
     private fun hideLoadingState(onComplete: (() -> Unit)? = null) {
@@ -532,11 +585,11 @@ class HomeFragment : Fragment() {
             return
         }
 
+        // Зменшено мінімальний час показу
         val loadingDuration = System.currentTimeMillis() - loadingStartTime
         val remainingTime = minimumLoadingTime - loadingDuration
 
-        if (remainingTime > 0) {
-            // Ensure minimum loading time for smooth UX
+        if (remainingTime > 0 && remainingTime < 50) { // Максимум 50ms затримки
             binding.root.postDelayed({
                 completeLoadingHide(onComplete)
             }, remainingTime)
@@ -546,93 +599,48 @@ class HomeFragment : Fragment() {
     }
 
     private fun completeLoadingHide(onComplete: (() -> Unit)?) {
-        Log.d(logTag, "completeLoadingHide: hiding optimized loading state")
+        Log.d(logTag, "completeLoadingHide: hiding loading state fast")
 
         isCalendarLoading = false
         currentLoadingState = LoadingState.LOADED
 
-        // Smooth fade out of loading state
+        // Швидше ховання лоадера
         binding.loadingState.animate()
             .alpha(0f)
             .setDuration(fadeOutDuration)
             .withEndAction {
                 binding.loadingState.isGone = true
                 binding.loadingIndicator.hide()
-
-                // Execute completion callback with calendar reveal animation
                 onComplete?.invoke()
             }
             .start()
     }
 
-    private fun animateViewsOut(onComplete: () -> Unit) {
-        val activeViews = listOfNotNull(
-            binding.weekdayHeader.takeIf { it.isVisible },
-            binding.calendarPager.takeIf { it.isVisible },
-            binding.weekPager.takeIf { it.isVisible },
-            binding.dayPager.takeIf { it.isVisible }
-        )
-
-        if (activeViews.isEmpty()) {
-            onComplete()
-            return
-        }
-
-        var animationsCompleted = 0
-        activeViews.forEach { view ->
-            view.animate()
-                .alpha(0f)
-                .setDuration(fadeOutDuration)
-                .withEndAction {
-                    animationsCompleted++
-                    if (animationsCompleted == activeViews.size) {
-                        onComplete()
-                    }
-                }
-                .start()
-        }
-    }
+    // Видалено складну animateViewsOut - тепер миттєво
 
     private fun startEnhancedLoadingAnimation() {
         binding.loadingIndicator.show()
-        updateLoadingStep(0)
+        // Простіша анімація без зайвих кроків
+        binding.loadingText.setText(loadingSteps[0])
 
-        // Simulate progressive loading steps
-        binding.root.postDelayed({ updateLoadingStep(1) }, 100)
-        binding.root.postDelayed({ updateLoadingStep(2) }, 200)
-    }
-
-    private fun updateLoadingStep(step: Int) {
-        if (step >= loadingSteps.size || !isCalendarLoading) return
-
-        currentLoadingStep = step
-        loadingProgress = (step + 1) / loadingSteps.size.toFloat()
-
-        // Update loading text with smooth transition
-        binding.loadingText.animate()
-            .alpha(0f)
-            .setDuration(50)
-            .withEndAction {
-                binding.loadingText.setText(loadingSteps[step])
-                binding.loadingText.animate()
-                    .alpha(1f)
-                    .setDuration(100)
-                    .start()
+        // Швидкий перехід до "готово"
+        binding.root.postDelayed({
+            if (isCalendarLoading && loadingSteps.size > 1) {
+                binding.loadingText.setText(loadingSteps[1])
             }
-            .start()
+        }, 50)
     }
 
-    // Enhanced setup methods with optimized loading and preloading
+    // Швидші setup методи без зайвих затримок
     private fun setupMonthPagerWithLoading() {
+        Log.d(logTag, "setupMonthPagerWithLoading: fast setup")
+
         if (pagerInitialised) {
-            // If already initialized, show calendar immediately with smooth transition
             showCalendarWithAnimation(ViewMode.MONTH)
             return
         }
 
-        // Check if we can preload this view
         if (preloadedViews.contains(ViewMode.MONTH)) {
-            Log.d(logTag, "Using preloaded month view")
             setupMonthPagerIfNeeded()
             showCalendarWithAnimation(ViewMode.MONTH)
             return
@@ -640,21 +648,18 @@ class HomeFragment : Fragment() {
 
         showLoadingState()
 
-        // Optimize loading timing based on view complexity
-        val loadingDelay = if (hasActiveSchedule) 150L else 50L
-
+        // Зменшено затримку з 200L до 50L
         binding.root.postDelayed({
-            if (isCalendarLoading) { // Check if still loading
+            if (isCalendarLoading) {
                 setupMonthPagerIfNeeded()
                 hideLoadingState {
                     showCalendarWithAnimation(ViewMode.MONTH)
-                    Log.d(logTag, "Month calendar loaded and displayed with animation")
-
-                    // Start preloading other views in background
-                    startBackgroundPreloading()
                 }
+            } else {
+                setupMonthPagerIfNeeded()
+                showCalendarWithAnimation(ViewMode.MONTH)
             }
-        }, loadingDelay)
+        }, 50)
     }
 
     private fun setupWeekPagerWithLoading() {
@@ -664,7 +669,6 @@ class HomeFragment : Fragment() {
         }
 
         if (preloadedViews.contains(ViewMode.WEEK)) {
-            Log.d(logTag, "Using preloaded week view")
             setupWeekPagerIfNeeded()
             showCalendarWithAnimation(ViewMode.WEEK)
             return
@@ -672,15 +676,15 @@ class HomeFragment : Fragment() {
 
         showLoadingState()
 
+        // Зменшено затримку з 100L до 30L
         binding.root.postDelayed({
             if (isCalendarLoading) {
                 setupWeekPagerIfNeeded()
                 hideLoadingState {
                     showCalendarWithAnimation(ViewMode.WEEK)
-                    Log.d(logTag, "Week calendar loaded and displayed with animation")
                 }
             }
-        }, 100)
+        }, 30)
     }
 
     private fun setupDayPagerWithLoading() {
@@ -690,7 +694,6 @@ class HomeFragment : Fragment() {
         }
 
         if (preloadedViews.contains(ViewMode.DAY)) {
-            Log.d(logTag, "Using preloaded day view")
             setupDayPagerIfNeeded()
             showCalendarWithAnimation(ViewMode.DAY)
             return
@@ -698,66 +701,56 @@ class HomeFragment : Fragment() {
 
         showLoadingState()
 
+        // Зменшено затримку з 80L до 20L
         binding.root.postDelayed({
             if (isCalendarLoading) {
                 setupDayPagerIfNeeded()
                 hideLoadingState {
                     showCalendarWithAnimation(ViewMode.DAY)
-                    Log.d(logTag, "Day calendar loaded and displayed with animation")
                 }
             }
-        }, 80)
+        }, 20)
     }
 
     private fun showCalendarWithAnimation(mode: ViewMode) {
         when (mode) {
             ViewMode.MONTH -> {
-                binding.weekdayHeader.alpha = 0f
-                binding.calendarPager.alpha = 0f
+                // Швидше відображення без альфа анімації
                 binding.weekdayHeader.isVisible = true
                 binding.calendarPager.isVisible = true
-
-                binding.weekdayHeader.animate().alpha(1f).setDuration(fadeInDuration).start()
-                binding.calendarPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+                binding.weekdayHeader.alpha = 1f
+                binding.calendarPager.alpha = 1f
             }
             ViewMode.WEEK -> {
-                binding.weekPager.alpha = 0f
                 binding.weekPager.isVisible = true
-                binding.weekPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+                binding.weekPager.alpha = 1f
             }
             ViewMode.DAY -> {
-                binding.dayPager.alpha = 0f
                 binding.dayPager.isVisible = true
-                binding.dayPager.animate().alpha(1f).setDuration(fadeInDuration).start()
+                binding.dayPager.alpha = 1f
             }
         }
     }
 
-    // Background preloading for better performance
+    // Оптимізоване фонове попереднє завантаження
     private fun startBackgroundPreloading() {
         if (!isPreloadingEnabled) return
 
+        // Зменшено затримку з 500ms до 200ms
         binding.root.postDelayed({
             if (!isCalendarLoading && hasActiveSchedule) {
-                Log.d(logTag, "Starting background preloading")
-
-                // Preload week view if not current mode
-                if (viewMode != ViewMode.WEEK && !weekPagerInitialised && !preloadedViews.contains(ViewMode.WEEK)) {
+                // Швидке попереднє завантаження без зайвих перевірок
+                if (viewMode != ViewMode.WEEK && !weekPagerInitialised) {
                     setupWeekPagerIfNeeded()
                     preloadedViews.add(ViewMode.WEEK)
-                    Log.d(logTag, "Preloaded week view")
                 }
 
-                // Preload day view if not current mode
-                if (viewMode != ViewMode.DAY && !dayPagerInitialised && !preloadedViews.contains(ViewMode.DAY)) {
-                    binding.root.postDelayed({
-                        setupDayPagerIfNeeded()
-                        preloadedViews.add(ViewMode.DAY)
-                        Log.d(logTag, "Preloaded day view")
-                    }, 200)
+                if (viewMode != ViewMode.DAY && !dayPagerInitialised) {
+                    setupDayPagerIfNeeded()
+                    preloadedViews.add(ViewMode.DAY)
                 }
             }
-        }, 500) // Start preloading after main view is settled
+        }, 200)
     }
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -779,4 +772,8 @@ class HomeFragment : Fragment() {
         dayPagerInitialised = false
         _binding = null
     }
+
+    // Preloading optimization - додана можливість відключення
+    private var isPreloadingEnabled = false // Відключено для швидшості
+    private val preloadedViews = mutableSetOf<ViewMode>()
 }
