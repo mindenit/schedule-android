@@ -190,7 +190,7 @@ class DayScheduleView @JvmOverloads constructor(
         val accentW = 4f * density
         val colGap = 4f * density
         val rowGap = 2f * density
-        val badgeTimeGap = 4f * density
+        val badgeTimeGap = 8f * density // збільшено відступ між бейджем і часом
 
         // Group events by identical visible slot (topMin..bottomMin)
         val groups = linkedMapOf<Pair<Int, Int>, MutableList<DayEvent>>()
@@ -255,9 +255,9 @@ class DayScheduleView @JvmOverloads constructor(
                 if (rawType.isNotEmpty()) {
                     // Draw type badge (chip) on line 1
                     val typeColors = EventColorResolver.colorsForType(this@DayScheduleView, rawType)
-                    val padH = 6f * density  // зменшуємо горизонтальний відступ
-                    val padV = 4f * density  // зменшуємо вертикальний відступ
-                    val chipCorner = 6f * density  // зменшуємо радіус кутів
+                    val padH = 6f * density
+                    val padV = 3.5f * density
+                    val chipCorner = 8f * density
 
                     val baseLabel = shortTypeLabel(rawType)
                     val maxTextW = (contentRight - contentLeft) - 2 * padH
@@ -274,15 +274,15 @@ class DayScheduleView @JvmOverloads constructor(
                     }
 
                     // Default chip bottom if we can't draw
-                    var chipBottom = line1Baseline + padV
+                    var chipBottom = line1Baseline
 
                     if (canDrawChip) {
+                        val fm = timeTextPaint.fontMetrics
                         val chipW = timeTextPaint.measureText(shownLabel) + 2 * padH
                         val chipLeft = contentLeft
-                        // Правильно обчислюємо верх і низ чіпа з меншими відступами
-                        val chipTop = line1Baseline - timeTextPaint.textSize * 0.8f - padV
-                        chipBottom = line1Baseline + padV * 0.6f
-                        val chipRect = RectF(chipLeft, chipTop, chipLeft + chipW, chipBottom)
+                        val chipTop = line1Baseline + fm.ascent - padV
+                        chipBottom = line1Baseline + fm.descent + padV // компактний бейдж без додаткового відступу
+                        val chipRect = RectF(chipLeft, chipTop, (chipLeft + chipW).coerceAtMost(contentRight), chipBottom)
 
                         val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = typeColors.background }
                         canvas.drawRoundRect(chipRect, chipCorner, chipCorner, chipPaint)
@@ -292,8 +292,8 @@ class DayScheduleView @JvmOverloads constructor(
                         canvas.drawText(shownLabel, chipLeft + padH, line1Baseline, timeTextPaint)
                         timeTextPaint.color = old
                     }
-                    // Збільшуємо відступ між бейджем і часом
-                    line2Baseline = max(line2Baseline, chipBottom + badgeTimeGap + 2f * density)
+                    // Збільшуємо відступ між бейджем і часом (не розтягуючи бейдж)
+                    line2Baseline = max(line2Baseline, chipBottom + badgeTimeGap + 4f * density)
                 }
 
                 // Line 2: time range
@@ -341,14 +341,21 @@ class DayScheduleView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            val x = event.x
-            val y = event.y
-            val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
-            if (hit != null) {
-                onEventClick?.invoke(hit)
-                performClick()
-                return true
+        val x = event.x
+        val y = event.y
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                // Start handling if touch is on an event card to receive the UP event
+                val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
+                if (hit != null) return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
+                if (hit != null) {
+                    onEventClick?.invoke(hit)
+                    performClick()
+                    return true
+                }
             }
         }
         return super.onTouchEvent(event)

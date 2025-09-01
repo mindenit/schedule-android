@@ -9,6 +9,7 @@ import androidx.appcompat.widget.PopupMenu
 import androidx.fragment.app.Fragment
 import com.mindenit.schedule.R
 import java.time.LocalDate
+import java.time.YearMonth
 
 /**
  * Навігатор для управління переходами між режимами календаря
@@ -137,7 +138,7 @@ class CalendarNavigator(
                 actionBar.title = DateTitleFormatter.formatMonthTitle(calendarState.selectedYearMonth)
             }
             CalendarState.ViewMode.WEEK -> {
-                actionBar.title = "" // Week mode might have different title logic
+                actionBar.title = DateTitleFormatter.formatMonthTitle(YearMonth.from(calendarState.selectedDate))
             }
             CalendarState.ViewMode.DAY -> {
                 actionBar.title = DateTitleFormatter.formatDayTitle(calendarState.selectedDate)

@@ -7,21 +7,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.TextView
-import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.google.android.material.button.MaterialButton
 import com.mindenit.schedule.R
-import com.mindenit.schedule.data.EventRepository
-import com.mindenit.schedule.data.ScheduleEntry
 import com.mindenit.schedule.data.ScheduleType
-import com.mindenit.schedule.data.SchedulesStorage
 import java.time.Instant
-import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlinx.coroutines.launch
 
 class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
 
@@ -60,22 +53,7 @@ class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(dt)
         } ?: "—"
 
-        view.findViewById<MaterialButton>(R.id.btn_set_active).setOnClickListener {
-            SchedulesStorage(requireContext()).setActive(type, id)
-            // Prefetch current month cache in background to accelerate first render
-            viewLifecycleOwner.lifecycleScope.launch {
-                try { EventRepository.ensureMonthCached(requireContext(), YearMonth.now()) } catch (_: Throwable) {}
-            }
-            parentFragmentManager.setFragmentResult(REQUEST_REFRESH, Bundle())
-            dismiss()
-        }
-
-        view.findViewById<MaterialButton>(R.id.btn_delete).setOnClickListener {
-            val entry = ScheduleEntry(type = type, id = id, name = name)
-            SchedulesStorage(requireContext()).remove(entry)
-            parentFragmentManager.setFragmentResult(REQUEST_REFRESH, Bundle())
-            dismiss()
-        }
+        // Buttons removed from layout; no actions here.
     }
 
     companion object {
@@ -85,7 +63,7 @@ class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
         private const val ARG_TYPE = "arg_type"
         private const val ARG_CREATED_AT = "arg_created_at"
 
-        fun newInstance(entry: ScheduleEntry): ScheduleDetailsBottomSheet = ScheduleDetailsBottomSheet().apply {
+        fun newInstance(entry: com.mindenit.schedule.data.ScheduleEntry): ScheduleDetailsBottomSheet = ScheduleDetailsBottomSheet().apply {
             arguments = Bundle().apply {
                 putLong(ARG_ID, entry.id)
                 putString(ARG_NAME, entry.name)
