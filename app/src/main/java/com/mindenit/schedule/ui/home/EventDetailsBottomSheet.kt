@@ -26,6 +26,7 @@ import com.google.android.material.textfield.TextInputLayout
 import com.mindenit.schedule.R
 import com.mindenit.schedule.data.SubjectLinksStorage
 import com.mindenit.schedule.databinding.BottomsheetEventDetailsBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.time.format.DateTimeFormatter
 
 class EventDetailsBottomSheet : BottomSheetDialogFragment() {
@@ -225,7 +226,7 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
         etTitle.setText(existing?.title ?: "")
         etUrl.setText(existing?.url ?: "")
 
-        val dialog = AlertDialog.Builder(ctx)
+        val dialog = MaterialAlertDialogBuilder(ctx)
             .setView(content)
             .create()
 
