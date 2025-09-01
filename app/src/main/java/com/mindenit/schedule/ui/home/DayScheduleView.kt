@@ -10,7 +10,6 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
-import com.google.android.material.R as MaterialR
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -63,33 +62,33 @@ class DayScheduleView @JvmOverloads constructor(
 
     // Paints with optimized initialization
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
         strokeWidth = hourLineWidth
     }
     private val halfHourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
         alpha = 80
         strokeWidth = 1f
     }
     private val nowLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
         strokeWidth = 2f * density
     }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurface)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorSurfaceContainerHigh)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
     }
     private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -235,7 +234,7 @@ class DayScheduleView @JvmOverloads constructor(
                 canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
 
                 // Accent strip
-                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
                 val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
                 canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
 
@@ -256,9 +255,9 @@ class DayScheduleView @JvmOverloads constructor(
                 if (rawType.isNotEmpty()) {
                     // Draw type badge (chip) on line 1
                     val typeColors = EventColorResolver.colorsForType(this@DayScheduleView, rawType)
-                    val padH = 8f * density
-                    val padV = 6f * density
-                    val chipCorner = 8f * density
+                    val padH = 6f * density  // зменшуємо горизонтальний відступ
+                    val padV = 4f * density  // зменшуємо вертикальний відступ
+                    val chipCorner = 6f * density  // зменшуємо радіус кутів
 
                     val baseLabel = shortTypeLabel(rawType)
                     val maxTextW = (contentRight - contentLeft) - 2 * padH
@@ -280,8 +279,9 @@ class DayScheduleView @JvmOverloads constructor(
                     if (canDrawChip) {
                         val chipW = timeTextPaint.measureText(shownLabel) + 2 * padH
                         val chipLeft = contentLeft
-                        val chipTop = line1Baseline - timeTextPaint.textSize + padV
-                        chipBottom = line1Baseline + padV
+                        // Правильно обчислюємо верх і низ чіпа з меншими відступами
+                        val chipTop = line1Baseline - timeTextPaint.textSize * 0.8f - padV
+                        chipBottom = line1Baseline + padV * 0.6f
                         val chipRect = RectF(chipLeft, chipTop, chipLeft + chipW, chipBottom)
 
                         val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = typeColors.background }
@@ -292,8 +292,8 @@ class DayScheduleView @JvmOverloads constructor(
                         canvas.drawText(shownLabel, chipLeft + padH, line1Baseline, timeTextPaint)
                         timeTextPaint.color = old
                     }
-                    // Ensure time line is placed below the chip with extra gap
-                    line2Baseline = max(line2Baseline, chipBottom + badgeTimeGap)
+                    // Збільшуємо відступ між бейджем і часом
+                    line2Baseline = max(line2Baseline, chipBottom + badgeTimeGap + 2f * density)
                 }
 
                 // Line 2: time range
