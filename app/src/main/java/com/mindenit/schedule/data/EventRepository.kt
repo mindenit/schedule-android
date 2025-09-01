@@ -11,6 +11,9 @@ import java.time.YearMonth
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object EventRepository {
     private const val PREFS = "events_cache"
@@ -25,9 +28,20 @@ object EventRepository {
     private fun cacheKey(type: ScheduleType, id: Long): String = "${type}_${id}"
     private fun monthKey(type: ScheduleType, id: Long, ym: YearMonth): String = cacheKey(type, id) + "_" + ym.toString()
 
-    // In-memory parsed cache to avoid repeated JSON parsing and mapping
-    private data class MonthMem(val stamp: String?, val events: List<Event>)
-    private val memory = mutableMapOf<String, MonthMem>()
+    // In-memory month cache to avoid repeated JSON parsing and filtering
+    private data class MonthCache(
+        val ym: YearMonth,
+        val all: List<Event>,
+        val byDate: Map<LocalDate, List<Event>>
+    )
+
+    private val memoryCache = ConcurrentHashMap<String, MonthCache>()
+    private val monthLocks = ConcurrentHashMap<String, Mutex>()
+
+    fun invalidateMemory() {
+        memoryCache.clear()
+        monthLocks.clear()
+    }
 
     suspend fun ensureMonthCached(context: Context, ym: YearMonth) {
         val storage = SchedulesStorage(context)
@@ -40,16 +54,18 @@ object EventRepository {
             return
         }
 
-        val monthKey = monthKey(active.first, active.second, ym)
+        val mKey = monthKey(active.first, active.second, ym)
 
         val today = LocalDate.now()
-        val lastDay = prefs(context).getString(KEY_DAY + monthKey, null)
+        val lastDay = prefs(context).getString(KEY_DAY + mKey, null)
 
-        Log.d(TAG, "Cache check: monthKey=$monthKey, lastDay=$lastDay, today=$today")
+        Log.d(TAG, "Cache check: monthKey=$mKey, lastDay=$lastDay, today=$today")
 
         if (lastDay == today.toString()) {
             Log.d(TAG, "Data already cached for today")
-            return // already cached today for this month
+            // Still ensure in-memory cache is warm (lazy if missing)
+            prewarmMonthIndex(context, ym)
+            return
         }
 
         val start = ym.atDay(1).atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
@@ -67,19 +83,19 @@ object EventRepository {
             }
 
             Log.d(TAG, "API response: ${dto.size} events received")
-            dto.forEachIndexed { index, event ->
-                Log.d(TAG, "Event $index: ${event.subject.title} at ${event.auditorium.name} on ${event.startedAt}")
-            }
 
             val json = gson.toJson(dto)
             prefs(context).edit {
-                putString(KEY_DATA + monthKey, json)
-                putString(KEY_DAY + monthKey, today.toString())
+                putString(KEY_DATA + mKey, json)
+                putString(KEY_DAY + mKey, today.toString())
             }
 
-            // Invalidate memory cache so it'll be rebuilt on next access
-            synchronized(memory) {
-                memory.remove(monthKey)
+            // Build and populate memory cache immediately to avoid UI hiccups later
+            try {
+                storeMonthInMemory(mKey, ym, dto.map { it.toDomain() })
+            } catch (e: Throwable) {
+                Log.w(TAG, "Failed to prebuild memory cache for month=$ym", e)
+                // Memory cache is optional; fall back to lazy build on demand
             }
 
             Log.d(TAG, "Data cached successfully")
@@ -98,10 +114,10 @@ object EventRepository {
             return emptyList()
         }
 
-        val monthKey = monthKey(active.first, active.second, ym)
-        val json = prefs(context).getString(KEY_DATA + monthKey, null)
+        val mKey = monthKey(active.first, active.second, ym)
+        val json = prefs(context).getString(KEY_DATA + mKey, null)
 
-        Log.d(TAG, "Loading cached data: monthKey=$monthKey, hasData=${json != null}")
+        Log.d(TAG, "Loading cached data: monthKey=$mKey, hasData=${json != null}")
 
         if (json == null) {
             Log.w(TAG, "No cached data found")
@@ -110,60 +126,149 @@ object EventRepository {
 
         return try {
             val type = object : TypeToken<List<com.mindenit.schedule.network.EventDto>>() {}.type
-            val events = gson.fromJson<List<com.mindenit.schedule.network.EventDto>>(json, type) ?: emptyList()
-            Log.d(TAG, "Loaded ${events.size} events from cache")
-            events
+            gson.fromJson<List<com.mindenit.schedule.network.EventDto>>(json, type) ?: emptyList()
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to parse cached data", e)
             emptyList()
         }
     }
 
-    // New: fast month-level events read with in-memory caching of parsed domain events
-    fun getEventsForMonth(context: Context, ym: YearMonth): List<Event> {
+    private suspend fun getOrBuildMonthCache(context: Context, ym: YearMonth): MonthCache? {
         val storage = SchedulesStorage(context)
-        val active = storage.getActive() ?: return emptyList()
+        val active = storage.getActive() ?: return null
         val mKey = monthKey(active.first, active.second, ym)
-        val stamp = prefs(context).getString(KEY_DAY + mKey, null)
-        synchronized(memory) {
-            val mem = memory[mKey]
-            if (mem != null && mem.stamp == stamp) {
-                return mem.events
+
+        memoryCache[mKey]?.let { return it }
+
+        val lock = monthLocks.getOrPut(mKey) { Mutex() }
+        return lock.withLock {
+            memoryCache[mKey]?.let { return@withLock it }
+
+            val dtos = withContext(Dispatchers.IO) { loadCachedDtos(context, ym) }
+            if (dtos.isEmpty()) return@withLock null
+
+            val domain = dtos.map { it.toDomain() }
+            val byDate = buildIndexByDate(domain, ym)
+            val cache = MonthCache(ym, domain, byDate)
+            memoryCache[mKey] = cache
+            cache
+        }
+    }
+
+    private fun storeMonthInMemory(mKey: String, ym: YearMonth, domain: List<Event>) {
+        val byDate = buildIndexByDate(domain, ym)
+        memoryCache[mKey] = MonthCache(ym, domain, byDate)
+    }
+
+    private fun buildIndexByDate(events: List<Event>, ym: YearMonth): Map<LocalDate, List<Event>> {
+        if (events.isEmpty()) return emptyMap()
+        val first = ym.atDay(1)
+        val last = ym.atEndOfMonth()
+        val map = HashMap<LocalDate, MutableList<Event>>()
+        for (e in events) {
+            // Clamp to month window; include multi-day overlaps
+            var d = e.start.toLocalDate()
+            val endD = e.end.toLocalDate()
+            if (endD.isBefore(first) || d.isAfter(last)) continue
+            if (d.isBefore(first)) d = first
+            val lastIncl = if (endD.isAfter(last)) last else endD
+            var cur = d
+            while (!cur.isAfter(lastIncl)) {
+                map.getOrPut(cur) { mutableListOf() }.add(e)
+                cur = cur.plusDays(1)
             }
         }
-        val dtos = loadCachedDtos(context, ym)
-        val domain = dtos.map { it.toDomain() }.sortedBy { it.start }
-        synchronized(memory) {
-            memory[mKey] = MonthMem(stamp, domain)
+        // Sort each day's events by start time for stable UI
+        return map.mapValues { (_, list) -> list.sortedBy { it.start } }
+    }
+
+    suspend fun prewarmMonthIndex(context: Context, ym: YearMonth) {
+        try { getOrBuildMonthCache(context, ym) } catch (_: Throwable) {}
+    }
+
+    // Fast, non-blocking accessors that rely only on in-memory cache.
+    // Return empty list if cache is not yet built.
+    fun getEventsForDateFast(context: Context, date: LocalDate): List<Event> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyList()
+        val ym = YearMonth.from(date)
+        val mKey = monthKey(active.first, active.second, ym)
+        val list = memoryCache[mKey]?.byDate?.get(date).orEmpty()
+        return list
+    }
+
+    fun getEventsForWeekFast(context: Context, startOfWeek: LocalDate): List<Event> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyList()
+        val end = startOfWeek.plusDays(6)
+        val ymStart = YearMonth.from(startOfWeek)
+        val ymEnd = YearMonth.from(end)
+        val keyStart = monthKey(active.first, active.second, ymStart)
+        val keyEnd = monthKey(active.first, active.second, ymEnd)
+        val all = when {
+            ymStart == ymEnd -> memoryCache[keyStart]?.all.orEmpty()
+            else -> memoryCache[keyStart]?.all.orEmpty() + memoryCache[keyEnd]?.all.orEmpty()
         }
-        return domain
+        if (all.isEmpty()) return emptyList()
+        return all.asSequence()
+            .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
+            .sortedBy { it.start }
+            .toList()
     }
 
     fun getEventsForDate(context: Context, date: LocalDate): List<Event> {
         val ym = YearMonth.from(date)
-        val events = getEventsForMonth(context, ym)
-            .filter { !it.start.toLocalDate().isAfter(date) && !it.end.toLocalDate().isBefore(date) }
-            .sortedBy { it.start }
-
-        Log.d(TAG, "getEventsForDate: date=$date, found ${events.size} events")
-        return events
+        return try {
+            val cache = kotlinx.coroutines.runBlocking { getOrBuildMonthCache(context, ym) }
+            val list = cache?.byDate?.get(date).orEmpty()
+            Log.d(TAG, "getEventsForDate: date=$date, found ${list.size} events")
+            list
+        } catch (e: Throwable) {
+            Log.w(TAG, "Fallback path for getEventsForDate due to ${e.message}")
+            // Fallback to previous implementation if something goes wrong
+            val events = loadCachedDtos(context, ym)
+                .map { it.toDomain() }
+                .filter { !it.start.toLocalDate().isAfter(date) && !it.end.toLocalDate().isBefore(date) }
+                .sortedBy { it.start }
+            Log.d(TAG, "getEventsForDate[fallback]: date=$date, found ${events.size} events")
+            events
+        }
     }
 
     fun getEventsForWeek(context: Context, startOfWeek: LocalDate): List<Event> {
         val end = startOfWeek.plusDays(6)
         val ymStart = YearMonth.from(startOfWeek)
         val ymEnd = YearMonth.from(end)
-        val domain = if (ymStart == ymEnd) {
-            getEventsForMonth(context, ymStart)
-        } else {
-            getEventsForMonth(context, ymStart) + getEventsForMonth(context, ymEnd)
+        return try {
+            val cacheStart = kotlinx.coroutines.runBlocking { getOrBuildMonthCache(context, ymStart) }
+            val cacheEnd = if (ymEnd == ymStart) cacheStart else kotlinx.coroutines.runBlocking { getOrBuildMonthCache(context, ymEnd) }
+            val all = when {
+                cacheStart == null && cacheEnd == null -> emptyList()
+                cacheStart != null && cacheEnd == null -> cacheStart.all
+                cacheStart == null && cacheEnd != null -> cacheEnd.all
+                else -> cacheStart!!.all + cacheEnd!!.all
+            }
+            val events = all
+                .asSequence()
+                .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
+                .sortedBy { it.start }
+                .toList()
+            Log.d(TAG, "getEventsForWeek: startOfWeek=$startOfWeek, found ${events.size} events")
+            events
+        } catch (e: Throwable) {
+            Log.w(TAG, "Fallback path for getEventsForWeek due to ${e.message}")
+            val dtos = if (ymStart == ymEnd) {
+                loadCachedDtos(context, ymStart)
+            } else {
+                loadCachedDtos(context, ymStart) + loadCachedDtos(context, ymEnd)
+            }
+            val events = dtos
+                .map { it.toDomain() }
+                .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
+                .sortedBy { it.start }
+            Log.d(TAG, "getEventsForWeek[fallback]: startOfWeek=$startOfWeek, found ${events.size} events")
+            return events
         }
-        val events = domain
-            .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
-            .sortedBy { it.start }
-
-        Log.d(TAG, "getEventsForWeek: startOfWeek=$startOfWeek, found ${events.size} events")
-        return events
     }
 
     fun getCountForDate(context: Context, date: LocalDate): Int {
@@ -174,10 +279,17 @@ object EventRepository {
 
     fun clearAll(context: Context) {
         prefs(context).edit { clear() }
-        synchronized(memory) { memory.clear() }
+        invalidateMemory()
     }
 
     fun getSubjectNamesFromCache(context: Context): Map<Long, String> {
+        // Try to reuse in-memory months first to avoid JSON parsing of all months
+        val names = HashMap<Long, String>()
+        memoryCache.values.forEach { cache ->
+            cache.all.forEach { e -> if (!names.containsKey(e.subject.id)) names[e.subject.id] = e.subject.title }
+        }
+        if (names.isNotEmpty()) return names
+
         val map = mutableMapOf<Long, String>()
         val all = prefs(context).all
         val gson = gson

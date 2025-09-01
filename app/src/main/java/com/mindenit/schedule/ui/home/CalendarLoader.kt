@@ -72,12 +72,14 @@ class CalendarLoader(
                     binding.weekPager.isGone = true
                     binding.dayPager.isGone = true
                     binding.weekdayHeader.isVisible = true
-                    binding.calendarPager.isVisible = true
-                    binding.weekdayHeader.alpha = 0f
-                    binding.calendarPager.alpha = 0f
+                    binding.calendarView.isVisible = true
+                    binding.calendarView.alpha = 0f
+                    // Old pager stays hidden
+                    binding.calendarPager.isGone = true
                 }
                 CalendarState.ViewMode.WEEK -> {
                     binding.weekdayHeader.isGone = true
+                    binding.calendarView.isGone = true
                     binding.calendarPager.isGone = true
                     binding.dayPager.isGone = true
                     binding.weekPager.isVisible = true
@@ -85,6 +87,7 @@ class CalendarLoader(
                 }
                 CalendarState.ViewMode.DAY -> {
                     binding.weekdayHeader.isGone = true
+                    binding.calendarView.isGone = true
                     binding.calendarPager.isGone = true
                     binding.weekPager.isGone = true
                     binding.dayPager.isVisible = true
@@ -100,7 +103,7 @@ class CalendarLoader(
             when (mode) {
                 CalendarState.ViewMode.MONTH -> {
                     binding.weekdayHeader.animate().alpha(1f).setDuration(fadeInDuration).start()
-                    binding.calendarPager.animate().alpha(1f).setDuration(fadeInDuration).withEndAction(onRevealed).start()
+                    binding.calendarView.animate().alpha(1f).setDuration(fadeInDuration).withEndAction(onRevealed).start()
                 }
                 CalendarState.ViewMode.WEEK -> {
                     binding.weekPager.animate().alpha(1f).setDuration(fadeInDuration).withEndAction(onRevealed).start()
@@ -146,9 +149,10 @@ class CalendarLoader(
             when (mode) {
                 CalendarState.ViewMode.MONTH -> {
                     binding.weekdayHeader.isVisible = true
-                    binding.calendarPager.isVisible = true
+                    binding.calendarView.isVisible = true
                     binding.weekdayHeader.alpha = 1f
-                    binding.calendarPager.alpha = 1f
+                    binding.calendarView.alpha = 1f
+                    binding.calendarPager.isGone = true
                 }
                 CalendarState.ViewMode.WEEK -> {
                     binding.weekPager.isVisible = true
@@ -165,9 +169,9 @@ class CalendarLoader(
     fun hideOtherPagers(currentMode: CalendarState.ViewMode) {
         scope.launch(Dispatchers.Main.immediate) {
             when (currentMode) {
-                CalendarState.ViewMode.MONTH -> { binding.weekPager.isGone = true; binding.dayPager.isGone = true }
-                CalendarState.ViewMode.WEEK -> { binding.weekdayHeader.isGone = true; binding.calendarPager.isGone = true; binding.dayPager.isGone = true }
-                CalendarState.ViewMode.DAY -> { binding.weekdayHeader.isGone = true; binding.calendarPager.isGone = true; binding.weekPager.isGone = true }
+                CalendarState.ViewMode.MONTH -> { binding.weekPager.isGone = true; binding.dayPager.isGone = true; binding.calendarPager.isGone = true }
+                CalendarState.ViewMode.WEEK -> { binding.weekdayHeader.isGone = true; binding.calendarView.isGone = true; binding.calendarPager.isGone = true; binding.dayPager.isGone = true }
+                CalendarState.ViewMode.DAY -> { binding.weekdayHeader.isGone = true; binding.calendarView.isGone = true; binding.calendarPager.isGone = true; binding.weekPager.isGone = true }
             }
         }
     }

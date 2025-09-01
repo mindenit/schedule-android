@@ -12,9 +12,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.core.content.ContextCompat
+import com.mindenit.schedule.R
+import com.kizitonwose.calendar.view.CalendarView
+import com.kizitonwose.calendar.view.ViewContainer
+import com.kizitonwose.calendar.view.MonthDayBinder
+import com.kizitonwose.calendar.core.CalendarDay
+import com.kizitonwose.calendar.core.DayPosition
 
 /**
- * Управління календарними pager-ами та їх ініціалізацією
+ * Управління календарними режимами та їх ініціалізацією
  */
 class CalendarManager(
     private val binding: FragmentHomeBinding,
@@ -23,30 +34,21 @@ class CalendarManager(
     private val scope: kotlinx.coroutines.CoroutineScope
 ) {
 
-    // Pager adapters and state
-    private var monthPagerAdapter: MonthPagerAdapter? = null
-    private var pagerInitialised = false
-    private var pagerBaseYearMonth: YearMonth? = null
+    // Month CalendarView state
+    private var monthCalendarInitialized = false
+    private var calendarBaseYearMonth: YearMonth? = null
 
     private var weekPagerAdapter: WeekPagerAdapter? = null
-    private var weekPagerInitialised = false
+    private var weekPagerInitialed = false
     private var pagerBaseStartOfWeek: LocalDate? = null
 
     private var dayPagerAdapter: DayPagerAdapter? = null
-    private var dayPagerInitialised = false
+    private var dayPagerInitialed = false
     private var pagerBaseDate: LocalDate? = null
 
     // Optimization cache
     private var cachedMonthIndex: Int = -1
     private var cachedMonthYearMonth: YearMonth? = null
-
-    // Cache of computed badges per month to avoid recomputation on main thread
-    private val monthBadgesCache = object : LinkedHashMap<YearMonth, Map<LocalDate, List<SubjectBadge>>>() {
-        private val maxEntries = 9 // current + neighbors in both directions
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<YearMonth, Map<LocalDate, List<SubjectBadge>>>?): Boolean {
-            return size > maxEntries
-        }
-    }
 
     private val logTag = "CalendarManager"
 
@@ -54,30 +56,26 @@ class CalendarManager(
     var onHeaderUpdate: (() -> Unit)? = null
 
     /**
-     * Налаштовує відповідний pager з оптимізованим завантаженням
+     * Налаштовує відповідний режим з оптимізованим завантаженням
      */
     fun setupPagerWithLoading(mode: CalendarState.ViewMode, onDateClick: (LocalDate) -> Unit) {
         when (mode) {
-            CalendarState.ViewMode.MONTH -> setupMonthPagerWithLoading(onDateClick)
+            CalendarState.ViewMode.MONTH -> setupMonthCalendarWithLoading(onDateClick)
             CalendarState.ViewMode.WEEK -> setupWeekPagerWithLoading()
             CalendarState.ViewMode.DAY -> setupDayPagerWithLoading()
         }
     }
 
-    private fun setupMonthPagerWithLoading(onDateClick: (LocalDate) -> Unit) {
-        // Якщо вже ініціалізовано - миттєво показуємо
-        if (pagerInitialised && calendarState.hasEverBeenInitialized) {
+    private fun setupMonthCalendarWithLoading(onDateClick: (LocalDate) -> Unit) {
+        if (monthCalendarInitialized && calendarState.hasEverBeenInitialized) {
             calendarLoader.showCalendarInstantly(CalendarState.ViewMode.MONTH)
             return
         }
 
-        // Показуємо лоадер тільки при першому завантаженні
         val showedLoader = calendarLoader.showLoadingIfNeeded(calendarState, CalendarState.ViewMode.MONTH)
-
-        // Швидка ініціалізація
         val delay = if (calendarState.isFirstTimeLoad) 200L else 0L
         binding.root.postDelayed({
-            setupMonthPagerIfNeeded(onDateClick)
+            setupMonthCalendarIfNeeded(onDateClick)
             if (showedLoader) {
                 calendarLoader.hideLoading(calendarState) {
                     calendarLoader.showCalendarInstantly(CalendarState.ViewMode.MONTH)
@@ -90,8 +88,228 @@ class CalendarManager(
         }, delay)
     }
 
+    private fun setupMonthCalendarIfNeeded(onDateClick: (LocalDate) -> Unit) {
+        if (monthCalendarInitialized) return
+        Log.d(logTag, "setupMonthCalendarIfNeeded: init with base=${calendarState.selectedYearMonth}")
+
+        val cv: CalendarView = binding.calendarView
+        calendarBaseYearMonth = calendarState.selectedYearMonth
+
+        val startMonth = calendarState.selectedYearMonth.minusYears(100)
+        val endMonth = calendarState.selectedYearMonth.plusYears(100)
+        val firstDayOfWeek = DayOfWeek.MONDAY // Fixed Monday as in UI header
+
+        cv.setup(startMonth, endMonth, firstDayOfWeek)
+        cv.scrollToMonth(calendarState.selectedYearMonth)
+        // Use our day layout
+        cv.dayViewResource = R.layout.item_calendar_day
+
+        // Prefetch initial month and neighbors
+        prefetchMonthCache(calendarState.selectedYearMonth)
+
+        // Day binder with our existing styles and badges
+        cv.dayBinder = object : MonthDayBinder<MonthDayContainer> {
+            override fun create(view: android.view.View): MonthDayContainer = MonthDayContainer(view)
+            override fun bind(container: MonthDayContainer, day: CalendarDay) {
+                val date = day.date
+                val inCurrentMonth = day.position == DayPosition.MonthDate
+                val badges = provideBadges(date)
+                container.bind(date, inCurrentMonth, badges, onDateClick)
+            }
+        }
+
+        // Update title and cache on month scroll
+        cv.monthScrollListener = { month ->
+            calendarState.selectedYearMonth = month.yearMonth
+            prefetchMonthCache(month.yearMonth)
+            onHeaderUpdate?.invoke()
+        }
+
+        monthCalendarInitialized = true
+    }
+
+    private fun provideBadges(date: LocalDate): List<SubjectBadge> {
+        val ctx = binding.root.context
+        val events = EventRepository.getEventsForDateFast(ctx, date)
+        if (events.isEmpty()) return emptyList()
+        val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
+        val sorted = grouped.entries.sortedBy { it.key }.map { (label, list) ->
+            val dominantType = list
+                .groupingBy { it.type.lowercase() }
+                .eachCount()
+                .maxByOrNull { it.value }
+                ?.key ?: ""
+            SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+        }
+        // Cap badges to at most 3 and show overflow counter
+        val maxBadges = 3
+        return if (sorted.size <= maxBadges) sorted else sorted.take(maxBadges - 1) + listOf(
+            SubjectBadge(label = "+${sorted.size - (maxBadges - 1)}", color = Color.parseColor("#9E9E9E"))
+        )
+    }
+
+    // Container for one day cell matching item_calendar_day
+    private inner class MonthDayContainer(view: android.view.View) : ViewContainer(view) {
+        private val container: android.view.View = view.findViewById(R.id.day_container)
+        private val dayNumber: TextView = view.findViewById(R.id.text_day_number)
+        private val eventsContainer: LinearLayout = view.findViewById(R.id.events_container)
+
+        // Cached visuals
+        private var todayBackground: GradientDrawable? = null
+        private var onPrimaryColor: Int = 0
+        private var todaySize: Int = 0
+        private var onBackgroundColor: Int = 0
+        private var initialized = false
+
+        private fun ensureInit() {
+            if (initialized) return
+            val ctx = view.context
+            val primaryColor = ContextCompat.getColor(ctx, R.color.purple_500)
+            onPrimaryColor = ContextCompat.getColor(ctx, android.R.color.white)
+            onBackgroundColor = ContextCompat.getColor(ctx, R.color.calendar_on_background)
+            todaySize = dpToPx(28f)
+            todayBackground = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = todaySize / 2f
+                setColor(primaryColor)
+            }
+            initialized = true
+        }
+
+        fun bind(date: LocalDate, inCurrentMonth: Boolean, badges: List<SubjectBadge>, onClick: (LocalDate) -> Unit) {
+            ensureInit()
+            dayNumber.text = date.dayOfMonth.toString()
+            view.alpha = if (inCurrentMonth) 1.0f else 0.38f
+
+            // Today highlighting
+            if (date == LocalDate.now()) {
+                dayNumber.background = todayBackground
+                dayNumber.setTextColor(onPrimaryColor)
+                dayNumber.layoutParams = dayNumber.layoutParams.apply {
+                    width = todaySize
+                    height = todaySize
+                }
+            } else {
+                dayNumber.background = null
+                dayNumber.setTextColor(onBackgroundColor)
+                // Reset to wrap content
+                dayNumber.layoutParams = dayNumber.layoutParams.apply {
+                    width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                }
+            }
+
+            // Click
+            container.setOnClickListener { onClick(date) }
+
+            // Badges
+            if (eventsContainer.childCount > 0) eventsContainer.removeAllViews()
+            if (badges.isNotEmpty()) {
+                val corner = dpToPx(4f).toFloat()
+                val strokeW = dpToPx(1f)
+                val strokeColor = Color.parseColor("#33000000")
+                badges.forEach { badge ->
+                    val ctx = view.context
+                    val row = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            cornerRadius = corner
+                            setColor(badge.color)
+                            setStroke(strokeW, strokeColor)
+                        }
+                        layoutParams = LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                            topMargin = dpToPx(2f)
+                        }
+                        setPadding(dpToPx(6f), dpToPx(3f), dpToPx(6f), dpToPx(3f))
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                    }
+                    val label = TextView(ctx).apply {
+                        text = badge.label
+                        setTextColor(ContextCompat.getColor(ctx, android.R.color.white))
+                        textSize = 12f
+                        typeface = Typeface.DEFAULT_BOLD
+                        maxLines = 1
+                        isSingleLine = true
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        layoutParams = LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    row.addView(label)
+                    eventsContainer.addView(row)
+                }
+            }
+        }
+
+        private fun dpToPx(dp: Float): Int = (dp * view.resources.displayMetrics.density).toInt()
+    }
+
+    private fun darkColorForType(typeLower: String, seed: String? = null): Int {
+        val t = typeLower.trim().lowercase()
+        fun hasAny(vararg keys: String) = keys.any { k -> t.contains(k) }
+        return when {
+            // Лекція (lecture)
+            hasAny("лек", "lec", "lecture", "лк") -> Color.parseColor("#0B8043") // green 700
+            // Лабораторна (lab)
+            hasAny("лаб", "lab", "laboratory", "лб") -> Color.parseColor("#1E3A8A") // indigo 800
+            // Практика (practice, PZ)
+            hasAny("практ", "пз", "prac", "practice", " pr ", " pr.") -> Color.parseColor("#B45309") // orange 700
+            // Семінар (seminar)
+            hasAny("сем", "semin") -> Color.parseColor("#6A1B9A") // purple 800
+            // Консультація (consultation)
+            hasAny("конс", "consult") -> Color.parseColor("#006064") // cyan 900
+            // Іспит (exam)
+            hasAny("ісп", "екз", "экз", "exam", "examin") -> Color.parseColor("#C62828") // red 800
+            // Залік (credit)
+            hasAny("залік", "зач", "credit", "pass/fail", "passfail") -> Color.parseColor("#00695C") // teal 800
+            // Контрольна/Тест
+            hasAny("контр", "тест", "test", "quiz") -> Color.parseColor("#FF6F00") // amber 800
+            // Курсова/Курсовий проєкт
+            hasAny("курсов", "кп", "кпп", "course work", "course project", "cw ", " cp ") -> Color.parseColor("#4E342E") // brown 800
+            // Факультатив/Електив
+            hasAny("факульт", "фак ", "elective", "optional") -> Color.parseColor("#1565C0") // blue 700
+            t.isNotEmpty() -> {
+                // Unknown type: pick from a spaced dark palette based on hash
+                val palette = intArrayOf(
+                    Color.parseColor("#0B8043"), // green 700
+                    Color.parseColor("#1E3A8A"), // indigo 800
+                    Color.parseColor("#B45309"), // orange 700
+                    Color.parseColor("#6A1B9A"), // purple 800
+                    Color.parseColor("#C62828"), // red 800
+                    Color.parseColor("#00695C"), // teal 800
+                    Color.parseColor("#4E342E"), // brown 800
+                    Color.parseColor("#1565C0"), // blue 700
+                    Color.parseColor("#2E7D32"), // green 800
+                    Color.parseColor("#AD1457"), // pink 800
+                    Color.parseColor("#283593"), // indigo 800 (alt)
+                    Color.parseColor("#00838F")  // cyan 800
+                )
+                val idx = kotlin.math.abs(t.hashCode()) % palette.size
+                palette[idx]
+            }
+            else -> {
+                val palette = intArrayOf(
+                    Color.parseColor("#0B8043"),
+                    Color.parseColor("#1E3A8A"),
+                    Color.parseColor("#B45309"),
+                    Color.parseColor("#6A1B9A"),
+                    Color.parseColor("#C62828"),
+                    Color.parseColor("#00695C"),
+                    Color.parseColor("#4E342E"),
+                    Color.parseColor("#1565C0"),
+                    Color.parseColor("#2E7D32"),
+                    Color.parseColor("#AD1457"),
+                    Color.parseColor("#283593"),
+                    Color.parseColor("#00838F")
+                )
+                val s = seed?.lowercase().orEmpty()
+                val idx = if (s.isNotEmpty()) kotlin.math.abs(s.hashCode()) % palette.size else 0
+                palette[idx]
+            }
+        }
+    }
+
     private fun setupWeekPagerWithLoading() {
-        if (weekPagerInitialised && calendarState.hasEverBeenInitialized) {
+        if (weekPagerInitialed && calendarState.hasEverBeenInitialized) {
             calendarLoader.showCalendarInstantly(CalendarState.ViewMode.WEEK)
             return
         }
@@ -114,7 +332,7 @@ class CalendarManager(
     }
 
     private fun setupDayPagerWithLoading() {
-        if (dayPagerInitialised && calendarState.hasEverBeenInitialized) {
+        if (dayPagerInitialed && calendarState.hasEverBeenInitialized) {
             calendarLoader.showCalendarInstantly(CalendarState.ViewMode.DAY)
             return
         }
@@ -136,128 +354,8 @@ class CalendarManager(
         }, delay)
     }
 
-    private fun setupMonthPagerIfNeeded(onDateClick: (LocalDate) -> Unit) {
-        if (pagerInitialised) return
-        Log.d(logTag, "setupMonthPagerIfNeeded: init with base=${calendarState.selectedYearMonth}")
-
-        val ctx = binding.root.context
-        val pager = binding.calendarPager
-        pagerBaseYearMonth = calendarState.selectedYearMonth
-        monthPagerAdapter = MonthPagerAdapter(
-            pagerBaseYearMonth!!,
-            onDateClick,
-            badgesProvider = { date ->
-                // Fast path: use precomputed month cache when available
-                val ym = YearMonth.from(date)
-                monthBadgesCache[ym]?.get(date) ?: run {
-                    // Fallback: compute on the fly using in-memory month events cache
-                    val events = EventRepository.getEventsForDate(ctx, date)
-                    val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
-                    grouped.entries.sortedBy { it.key }.map { (label, list) ->
-                        val dominantType = list
-                            .groupingBy { it.type.lowercase() }
-                            .eachCount()
-                            .maxByOrNull { it.value }
-                            ?.key ?: ""
-                        SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
-                    }
-                }
-            }
-        )
-        pager.adapter = monthPagerAdapter
-        pager.offscreenPageLimit = 1
-        pager.setCurrentItem(MonthPagerAdapter.START_INDEX, false)
-        onHeaderUpdate?.invoke()
-
-        // Ensure cache for initial month and neighbors
-        prefetchMonthCache(calendarState.selectedYearMonth)
-        // Additionally precompute badges for current month if possible
-        precomputeMonthBadges(calendarState.selectedYearMonth)
-
-        pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) {
-                val base = pagerBaseYearMonth ?: calendarState.selectedYearMonth
-                val diff = position - MonthPagerAdapter.START_INDEX
-                calendarState.selectedYearMonth = base.plusMonths(diff.toLong())
-                // Prefetch cache for current and adjacent months
-                prefetchMonthCache(calendarState.selectedYearMonth)
-                precomputeMonthBadges(calendarState.selectedYearMonth)
-                precomputeMonthBadges(calendarState.selectedYearMonth.minusMonths(1))
-                precomputeMonthBadges(calendarState.selectedYearMonth.plusMonths(1))
-                // Notify header update
-                onHeaderUpdate?.invoke()
-            }
-        })
-        pagerInitialised = true
-    }
-
-    private fun darkColorForType(typeLower: String, seed: String? = null): Int {
-        val t = typeLower.trim().lowercase()
-        fun hasAny(vararg keys: String) = keys.any { k -> t.contains(k) }
-        return when {
-            // Лекція (lecture)
-            hasAny("лек", "lec", "lecture", "лк") -> android.graphics.Color.parseColor("#0B8043") // green 700
-            // Лабораторна (lab)
-            hasAny("лаб", "lab", "laboratory", "лб") -> android.graphics.Color.parseColor("#1E3A8A") // indigo 800
-            // Практика (practice, PZ)
-            hasAny("практ", "пз", "prac", "practice", " pr ", " pr.") -> android.graphics.Color.parseColor("#B45309") // orange 700
-            // Семінар (seminar)
-            hasAny("сем", "semin") -> android.graphics.Color.parseColor("#6A1B9A") // purple 800
-            // Консультація (consultation)
-            hasAny("конс", "consult") -> android.graphics.Color.parseColor("#006064") // cyan 900
-            // Іспит (exam)
-            hasAny("ісп", "екз", "экз", "exam", "examin") -> android.graphics.Color.parseColor("#C62828") // red 800
-            // Залік (credit)
-            hasAny("залік", "зач", "credit", "pass/fail", "passfail") -> android.graphics.Color.parseColor("#00695C") // teal 800
-            // Контрольна/Тест
-            hasAny("контр", "тест", "test", "quiz") -> android.graphics.Color.parseColor("#FF6F00") // amber 800
-            // Курсова/Курсовий проєкт
-            hasAny("курсов", "кп", "кпп", "course work", "course project", "cw ", " cp ") -> android.graphics.Color.parseColor("#4E342E") // brown 800
-            // Факультатив/Електив
-            hasAny("факульт", "фак ", "elective", "optional") -> android.graphics.Color.parseColor("#1565C0") // blue 700
-            t.isNotEmpty() -> {
-                // Unknown type: pick from a spaced dark palette based on hash
-                val palette = intArrayOf(
-                    android.graphics.Color.parseColor("#0B8043"), // green 700
-                    android.graphics.Color.parseColor("#1E3A8A"), // indigo 800
-                    android.graphics.Color.parseColor("#B45309"), // orange 700
-                    android.graphics.Color.parseColor("#6A1B9A"), // purple 800
-                    android.graphics.Color.parseColor("#C62828"), // red 800
-                    android.graphics.Color.parseColor("#00695C"), // teal 800
-                    android.graphics.Color.parseColor("#4E342E"), // brown 800
-                    android.graphics.Color.parseColor("#1565C0"), // blue 700
-                    android.graphics.Color.parseColor("#2E7D32"), // green 800
-                    android.graphics.Color.parseColor("#AD1457"), // pink 800
-                    android.graphics.Color.parseColor("#283593"), // indigo 800 (alt)
-                    android.graphics.Color.parseColor("#00838F")  // cyan 800
-                )
-                val idx = kotlin.math.abs(t.hashCode()) % palette.size
-                palette[idx]
-            }
-            else -> {
-                val palette = intArrayOf(
-                    android.graphics.Color.parseColor("#0B8043"),
-                    android.graphics.Color.parseColor("#1E3A8A"),
-                    android.graphics.Color.parseColor("#B45309"),
-                    android.graphics.Color.parseColor("#6A1B9A"),
-                    android.graphics.Color.parseColor("#C62828"),
-                    android.graphics.Color.parseColor("#00695C"),
-                    android.graphics.Color.parseColor("#4E342E"),
-                    android.graphics.Color.parseColor("#1565C0"),
-                    android.graphics.Color.parseColor("#2E7D32"),
-                    android.graphics.Color.parseColor("#AD1457"),
-                    android.graphics.Color.parseColor("#283593"),
-                    android.graphics.Color.parseColor("#00838F")
-                )
-                val s = seed?.lowercase().orEmpty()
-                val idx = if (s.isNotEmpty()) kotlin.math.abs(s.hashCode()) % palette.size else 0
-                palette[idx]
-            }
-        }
-    }
-
     private fun setupWeekPagerIfNeeded() {
-        if (weekPagerInitialised) return
+        if (weekPagerInitialed) return
         Log.d(logTag, "setupWeekPagerIfNeeded: init with startOfWeek")
 
         val ctx = binding.root.context
@@ -266,12 +364,11 @@ class CalendarManager(
         pagerBaseStartOfWeek = startOfWeek
         weekPagerAdapter = WeekPagerAdapter(startOfWeek,
             eventsProvider = { start ->
-                val events = EventRepository.getEventsForWeek(ctx, start)
+                val events = EventRepository.getEventsForWeekFast(ctx, start)
                 events.map {
                     val subj = it.subject.brief.ifBlank { it.subject.title }
-                    val aud = it.auditorium.name
                     WeekScheduleView.WeekEvent(
-                        title = "$subj • $aud",
+                        title = "$subj • ${it.auditorium.name}",
                         start = it.start,
                         end = it.end,
                         color = darkColorForType(it.type, seed = subj),
@@ -296,19 +393,16 @@ class CalendarManager(
         pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 val base = pagerBaseStartOfWeek ?: calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                val diff = position - WeekPagerAdapter.START_INDEX
-                calendarState.selectedDate = base.plusWeeks(diff.toLong())
-                // Prefetch month cache for the newly visible week
+                calendarState.selectedDate = base.plusWeeks((position - WeekPagerAdapter.START_INDEX).toLong())
                 prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
-                // Notify header update
                 onHeaderUpdate?.invoke()
             }
         })
-        weekPagerInitialised = true
+        weekPagerInitialed = true
     }
 
     private fun setupDayPagerIfNeeded() {
-        if (dayPagerInitialised) return
+        if (dayPagerInitialed) return
         Log.d(logTag, "setupDayPagerIfNeeded: init with baseDate=${calendarState.selectedDate}")
 
         val ctx = binding.root.context
@@ -316,7 +410,7 @@ class CalendarManager(
         pagerBaseDate = calendarState.selectedDate
         dayPagerAdapter = DayPagerAdapter(pagerBaseDate!!,
             eventsProvider = { date ->
-                val events = EventRepository.getEventsForDate(ctx, date)
+                val events = EventRepository.getEventsForDateFast(ctx, date)
                 events.map {
                     val subj = it.subject.brief.ifBlank { it.subject.title }
                     DayScheduleView.DayEvent(
@@ -348,13 +442,11 @@ class CalendarManager(
                 val base = pagerBaseDate ?: calendarState.selectedDate
                 val diff = position - DayPagerAdapter.START_INDEX
                 calendarState.selectedDate = base.plusDays(diff.toLong())
-                // Prefetch month cache for the newly visible day
                 prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
-                // Notify header update
                 onHeaderUpdate?.invoke()
             }
         })
-        dayPagerInitialised = true
+        dayPagerInitialed = true
     }
 
     // Prefetch current and adjacent months with daily guard inside repository
@@ -375,16 +467,11 @@ class CalendarManager(
             try { EventRepository.ensureMonthCached(ctx, ym.plusMonths(1)) } catch (_: Throwable) {}
 
             if (cachedCurrent) {
-                // Invalidate and recompute month badges for this ym
-                synchronized(monthBadgesCache) { monthBadgesCache.remove(ym) }
-                precomputeMonthBadges(ym)
-
                 withContext(Dispatchers.Main) {
                     Log.d(logTag, "Refreshing UI after cache update")
-                    // Refresh visible month page
-                    monthPagerAdapter?.let {
-                        Log.d(logTag, "Notifying month adapter item changed")
-                        binding.calendarPager.adapter?.notifyItemChanged(binding.calendarPager.currentItem)
+                    // Refresh month view
+                    if (monthCalendarInitialized) {
+                        binding.calendarView.notifyCalendarChanged()
                     }
                     // If the selected date is in this month, refresh week/day pages too
                     if (YearMonth.from(calendarState.selectedDate) == ym) {
@@ -402,77 +489,25 @@ class CalendarManager(
         }
     }
 
-    // Compute badges per day for the given month using in-memory repository cache
-    private fun precomputeMonthBadges(ym: YearMonth) {
-        val ctx = binding.root.context
-        scope.launch(Dispatchers.Default) {
-            try {
-                val events = EventRepository.getEventsForMonth(ctx, ym)
-                if (events.isEmpty()) return@launch
-                val map = mutableMapOf<LocalDate, MutableMap<String, MutableList<com.mindenit.schedule.data.Event>>>()
-                for (ev in events) {
-                    // For days spanning across midnight, attribute to each day in range
-                    var d = ev.start.toLocalDate()
-                    val end = ev.end.toLocalDate()
-                    while (!d.isAfter(end)) {
-                        if (YearMonth.from(d) == ym) {
-                            val label = ev.subject.brief.ifBlank { ev.subject.title }
-                            val byLabel = map.getOrPut(d) { mutableMapOf() }
-                            byLabel.getOrPut(label) { mutableListOf() }.add(ev)
-                        }
-                        d = d.plusDays(1)
-                    }
-                }
-                val result = mutableMapOf<LocalDate, List<SubjectBadge>>()
-                for ((date, groups) in map) {
-                    val badges = groups.entries.sortedBy { it.key }.map { (label, list) ->
-                        val dominantType = list
-                            .groupingBy { it.type.lowercase() }
-                            .eachCount()
-                            .maxByOrNull { it.value }
-                            ?.key ?: ""
-                        SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
-                    }
-                    result[date] = badges
-                }
-                synchronized(monthBadgesCache) {
-                    monthBadgesCache[ym] = result
-                }
-                withContext(Dispatchers.Main) {
-                    if (pagerInitialised && YearMonth.from(calendarState.selectedYearMonth) == ym) {
-                        binding.calendarPager.adapter?.notifyItemChanged(binding.calendarPager.currentItem)
-                    }
-                }
-            } catch (t: Throwable) {
-                Log.e(logTag, "Failed to precompute month badges for $ym", t)
-            }
-        }
-    }
-
     /**
      * Позиціонує календар у правильну позицію
      */
     fun positionPager(mode: CalendarState.ViewMode) {
         when (mode) {
-            CalendarState.ViewMode.MONTH -> positionMonthPager()
+            CalendarState.ViewMode.MONTH -> positionMonthCalendar()
             CalendarState.ViewMode.WEEK -> positionWeekPager()
             CalendarState.ViewMode.DAY -> positionDayPager()
         }
     }
 
-    private fun positionMonthPager() {
-        if (pagerInitialised) {
-            val base = pagerBaseYearMonth ?: calendarState.selectedYearMonth
-            val diff = getOptimizedMonthIndex(calendarState.selectedYearMonth) - getOptimizedMonthIndex(base)
-            val target = MonthPagerAdapter.START_INDEX + diff
-            if (binding.calendarPager.currentItem != target) {
-                binding.calendarPager.setCurrentItem(target, false)
-            }
+    private fun positionMonthCalendar() {
+        if (monthCalendarInitialized) {
+            binding.calendarView.scrollToMonth(calendarState.selectedYearMonth)
         }
     }
 
     private fun positionWeekPager() {
-        if (weekPagerInitialised) {
+        if (weekPagerInitialed) {
             val base = pagerBaseStartOfWeek ?: calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             val diff = ChronoUnit.WEEKS.between(base, calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))).toInt()
             val target = WeekPagerAdapter.START_INDEX + diff
@@ -483,7 +518,7 @@ class CalendarManager(
     }
 
     private fun positionDayPager() {
-        if (dayPagerInitialised) {
+        if (dayPagerInitialed) {
             val base = pagerBaseDate ?: calendarState.selectedDate
             val diff = ChronoUnit.DAYS.between(base, calendarState.selectedDate).toInt()
             val target = DayPagerAdapter.START_INDEX + diff
@@ -493,26 +528,14 @@ class CalendarManager(
         }
     }
 
-    private fun getOptimizedMonthIndex(ym: YearMonth): Int {
-        // Cache last computed month index to avoid repeated calculations
-        if (cachedMonthYearMonth == ym && cachedMonthIndex >= 0) {
-            return cachedMonthIndex
-        }
-        val base = pagerBaseYearMonth ?: calendarState.selectedYearMonth
-        val diff = ChronoUnit.MONTHS.between(base, ym).toInt()
-        cachedMonthIndex = MonthPagerAdapter.START_INDEX + diff
-        cachedMonthYearMonth = ym
-        return cachedMonthIndex
-    }
-
     /**
-     * Перевіряє чи і��іціалізований pager для вказаного режиму
+     * Перевіряє чи ініціалізований режим для вказаного ViewMode
      */
     fun isPagerInitialized(mode: CalendarState.ViewMode): Boolean {
         return when (mode) {
-            CalendarState.ViewMode.MONTH -> pagerInitialised && monthPagerAdapter != null
-            CalendarState.ViewMode.WEEK -> weekPagerInitialised && weekPagerAdapter != null
-            CalendarState.ViewMode.DAY -> dayPagerInitialised && dayPagerAdapter != null
+            CalendarState.ViewMode.MONTH -> monthCalendarInitialized
+            CalendarState.ViewMode.WEEK -> weekPagerInitialed && weekPagerAdapter != null
+            CalendarState.ViewMode.DAY -> dayPagerInitialed && dayPagerAdapter != null
         }
     }
 
@@ -520,14 +543,12 @@ class CalendarManager(
      * Очищає адаптери при знищенні view
      */
     fun cleanup() {
-        monthPagerAdapter = null
         weekPagerAdapter = null
         dayPagerAdapter = null
-        pagerInitialised = false
-        weekPagerInitialised = false
-        dayPagerInitialised = false
+        monthCalendarInitialized = false
+        weekPagerInitialed = false
+        dayPagerInitialed = false
         cachedMonthIndex = -1
         cachedMonthYearMonth = null
-        synchronized(monthBadgesCache) { monthBadgesCache.clear() }
     }
 }

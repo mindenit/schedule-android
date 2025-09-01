@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="пн"
+            android:text="@string/weekday_mon_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -35,7 +35,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="вт"
+            android:text="@string/weekday_tue_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -43,7 +43,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="ср"
+            android:text="@string/weekday_wed_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -51,7 +51,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="чт"
+            android:text="@string/weekday_thu_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -59,7 +59,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="пт"
+            android:text="@string/weekday_fri_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -67,7 +67,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="сб"
+            android:text="@string/weekday_sat_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
         <TextView
@@ -75,17 +75,33 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="нд"
+            android:text="@string/weekday_sun_short"
             android:textColor="@color/calendar_on_background"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium" />
     </LinearLayout>
 
-    <!-- Month pager for interactive swiping between months -->
+    <!-- New high-performance CalendarView for month mode -->
+    <com.kizitonwose.calendar.view.CalendarView
+        android:id="@+id/calendar_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        android:background="@color/calendar_background"
+        app:cv_dayViewResource="@layout/item_calendar_day"
+        app:cv_daySize="rectangle"
+        app:cv_outDateStyle="endOfGrid"
+        app:layout_constraintTop_toBottomOf="@id/weekday_header"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Month pager kept for reference but no longer used -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/calendar_pager"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@color/calendar_background"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/weekday_header"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -159,7 +175,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Підготовка календаря для перегляду"
+            android:text="@string/loading_calendar_hint"
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="?attr/colorOnSurfaceVariant"
             android:alpha="0.6"

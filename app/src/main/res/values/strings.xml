@@ -96,4 +96,11 @@
     <string name="default_view_week">Тиждень</string>
     <string name="default_view_day">День</string>
     <string name="label_auditorium">Аудиторія</string>
+    <string name="weekday_mon_short">пн</string>
+    <string name="weekday_tue_short">вт</string>
+    <string name="weekday_wed_short">ср</string>
+    <string name="weekday_thu_short">чт</string>
+    <string name="weekday_fri_short">пт</string>
+    <string name="weekday_sat_short">сб</string>
+    <string name="weekday_sun_short">нд</string>
 </resources>
