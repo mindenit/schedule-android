@@ -54,4 +54,9 @@
     <string name="active">Активний</string>
     <string name="calendar_empty_state">Немає активного розкладу. Додайте розклад, щоб переглядати календар.</string>
     <string name="select_schedule">Обрати розклад</string>
+    <string name="label_teachers">Викладачі</string>
+    <string name="label_groups">Групи</string>
+    <string name="placeholder_empty">—</string>
+    <string name="teacher_ids_format">ID викладачів: %1$s</string>
+    <string name="group_ids_format">ID груп: %1$s</string>
 </resources>

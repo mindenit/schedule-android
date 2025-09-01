@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
 import java.time.DayOfWeek
@@ -33,7 +34,8 @@ class WeekScheduleView @JvmOverloads constructor(
         val title: String,
         val start: LocalDateTime,
         val end: LocalDateTime,
-        val color: Int? = null
+        val color: Int? = null,
+        val meta: Any? = null
     )
 
     private var startOfWeek: LocalDate = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -88,16 +90,30 @@ class WeekScheduleView @JvmOverloads constructor(
         color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
-    private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val eventTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnPrimary)
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
+    private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurface)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13f, resources.displayMetrics)
+        isFakeBoldText = true
     }
+    private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 11.5f, resources.displayMetrics)
+    }
+    private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+    }
+    private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private val dayFormatter = DateTimeFormatter.ofPattern("EEE d", Locale.forLanguageTag("uk"))
 
     // Reusable rect to avoid allocations in onDraw
     private val tmpRect = RectF()
+
+    // Hit detection rects for events
+    private val hitRects: MutableList<Pair<RectF, WeekEvent>> = mutableListOf()
+
+    // Event click listener
+    var onEventClick: ((WeekEvent) -> Unit)? = null
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val desiredHours = (endMinutes - startMinutes) / 60f // 11h
@@ -203,46 +219,172 @@ class WeekScheduleView @JvmOverloads constructor(
             }
         }
 
-        // Draw events (clamped to visible window)
-        for (event in events) {
-            val dayIndex = ((event.start.toLocalDate().dayOfWeek.value + 6) % 7)
-            if (dayIndex !in 0..6) continue
+        // Draw events (group same-time in one slot per day)
+        hitRects.clear()
+        for (dayIndex in 0..6) {
+            // Collect events for this day and clamp to visible window
+            val dayEvents = events.filter { ((it.start.toLocalDate().dayOfWeek.value + 6) % 7) == dayIndex }
+            if (dayEvents.isEmpty()) continue
+
             val columnLeft = gridLeft + dayIndex * dayWidth
             val columnRight = columnLeft + dayWidth
 
-            val startMin = minutesSinceStartOfDay(event.start)
-            val endMin = minutesSinceStartOfDay(event.end)
-            val topMin = startMin.coerceAtLeast(startMinutes)
-            val bottomMin = endMin.coerceAtMost(endMinutes)
-            if (bottomMin <= startMinutes || topMin >= endMinutes) continue
+            // key: Pair(topMin, bottomMin)
+            val groups = linkedMapOf<Pair<Int, Int>, MutableList<WeekEvent>>()
+            for (e in dayEvents) {
+                val s = minutesSinceStartOfDay(e.start)
+                val en = minutesSinceStartOfDay(e.end)
+                val topMin = s.coerceAtLeast(startMinutes)
+                val bottomMin = en.coerceAtMost(endMinutes)
+                if (bottomMin <= startMinutes || topMin >= endMinutes) continue
+                val key = Pair(topMin, bottomMin)
+                groups.getOrPut(key) { mutableListOf() }.add(e)
+            }
 
-            val top = minuteToY(topMin)
-            val bottom = minuteToY(bottomMin)
+            for ((key, list) in groups) {
+                if (list.isEmpty()) continue
+                val (topMin, bottomMin) = key
+                val top = minuteToY(topMin)
+                val bottom = minuteToY(bottomMin)
 
-            val bgColor = event.color ?: MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer)
-            eventPaint.color = bgColor
-            tmpRect.set(
-                columnLeft + 6f * density,
-                top + 2f * density,
-                columnRight - 6f * density,
-                bottom - 2f * density
-            )
-            canvas.drawRoundRect(tmpRect, 8f * density, 8f * density, eventPaint)
+                val corner = 8f * density
+                val hPad = 6f * density
+                val vPad = 2f * density
+                val accentW = 2f * density
+                val colGap = 2f * density
 
-            // Text inside event (clip to event rect)
-            val text = event.title
-            val textX = tmpRect.left + 6f * density
-            val textY = tmpRect.top + eventTextPaint.textSize + 4f * density
-            val save = canvas.save()
-            canvas.clipRect(tmpRect)
-            canvas.drawText(text, textX, textY, eventTextPaint)
-            canvas.restoreToCount(save)
+                val slotLeft = columnLeft + hPad
+                val slotRight = columnRight - hPad
+                val cols = list.size
+                val totalGap = colGap * (cols - 1)
+                val perW = ((slotRight - slotLeft - totalGap) / cols).coerceAtLeast(8f * density)
+
+                // sort for stable order (e.g., by title)
+                val sorted = list.sortedBy { it.title }
+                for ((idx, event) in sorted.withIndex()) {
+                    val left = slotLeft + idx * (perW + colGap)
+                    val right = (left + perW).coerceAtMost(slotRight)
+
+                    // Card rect
+                    tmpRect.set(left, top + vPad, right, bottom - vPad)
+                    canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
+
+                    // Accent
+                    accentPaint.color = event.color ?: MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary)
+                    val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
+                    canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
+
+                    // Hit rect per sub-card
+                    hitRects.add(Pair(RectF(tmpRect), event))
+
+                    // Content area
+                    val contentLeft = tmpRect.left + accentW + 4f * density
+                    val contentRight = tmpRect.right - 4f * density
+                    var cursorY = tmpRect.top + 6f * density + timeTextPaint.textSize
+
+                    // Split title to subject/location if formatted as "subject • location"
+                    val parts = event.title.split(" • ", limit = 2)
+                    val subject = parts.getOrNull(0) ?: event.title
+                    val location = parts.getOrNull(1)
+                    val startStr = String.format(Locale.getDefault(), "%02d:%02d", event.start.toLocalTime().hour, event.start.toLocalTime().minute)
+                    val endStr = String.format(Locale.getDefault(), "%02d:%02d", event.end.toLocalTime().hour, event.end.toLocalTime().minute)
+
+                    // Clip to sub-card
+                    val save = canvas.save()
+                    canvas.clipRect(tmpRect)
+
+                    // Draw time on two lines (start then end), both wrapped if needed
+                    cursorY = drawWrapped(canvas, startStr, contentLeft, contentRight, cursorY, timeTextPaint, tmpRect.bottom - 6f * density)
+                    cursorY = drawWrapped(canvas, endStr, contentLeft, contentRight, cursorY, timeTextPaint, tmpRect.bottom - 6f * density)
+
+                    // Available height below
+                    var available = tmpRect.height() - (cursorY - tmpRect.top) - 6f * density
+
+                    // Subject
+                    if (available > titleTextPaint.textSize * 0.9f) {
+                        cursorY += 4f * density + titleTextPaint.textSize
+                        cursorY = drawWrapped(canvas, subject, contentLeft, contentRight, cursorY, titleTextPaint, tmpRect.bottom - 6f * density)
+                        available = tmpRect.height() - (cursorY - tmpRect.top) - 6f * density
+                    }
+                    // Location
+                    if (location != null && available > infoTextPaint.textSize * 1.1f + 2f * density) {
+                        cursorY += 2f * density + infoTextPaint.textSize
+                        cursorY = drawWrapped(canvas, location, contentLeft, contentRight, cursorY, infoTextPaint, tmpRect.bottom - 6f * density)
+                    }
+
+                    canvas.restoreToCount(save)
+                }
+            }
         }
+    }
+
+    // Draws text wrapped by characters within [left,right] and up to maxBottom.
+    // Returns the last baseline Y used (for chaining further text).
+    private fun drawWrapped(
+        canvas: Canvas,
+        text: String,
+        left: Float,
+        right: Float,
+        startBaselineY: Float,
+        paint: TextPaint,
+        maxBottom: Float
+    ): Float {
+        val maxWidth = right - left
+        val lineAdvance = paint.textSize * 1.2f
+        var baselineY = startBaselineY
+        var index = 0
+        val len = text.length
+        val measured = FloatArray(1)
+
+        while (index < len && baselineY <= maxBottom) {
+            val count = paint.breakText(text, index, len, true, maxWidth, measured)
+            if (count <= 0) break
+            val end = (index + count).coerceAtMost(len)
+            val line = text.substring(index, end)
+            canvas.drawText(line, left, baselineY, paint)
+            index = end
+            val nextBaseline = baselineY + lineAdvance
+            if (nextBaseline > maxBottom && index < len) {
+                // Replace last line with ellipsis if truncated
+                val ellipsis = "\u2026"
+                var ell = line
+                var w = paint.measureText(ell + ellipsis)
+                while (ell.isNotEmpty() && w > maxWidth) {
+                    ell = ell.substring(0, ell.length - 1)
+                    w = paint.measureText(ell + ellipsis)
+                }
+                // Clear the previously drawn line area by overdrawing background? Not needed due to clip and overwrite next line area minimal; just draw over slightly lower
+                canvas.drawText("$ell$ellipsis", left, baselineY, paint)
+                return baselineY
+            }
+            baselineY = nextBaseline
+        }
+        // If we exited because baseline exceeded, step back one line
+        return baselineY
     }
 
     private fun minutesSinceStartOfDay(dt: LocalDateTime): Int {
         val t = dt.toLocalTime()
         return t.hour * 60 + t.minute
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_UP) {
+            val x = event.x
+            val y = event.y
+            val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
+            if (hit != null) {
+                onEventClick?.invoke(hit)
+                performClick()
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     fun setWeek(start: LocalDate, events: List<WeekEvent>) {
@@ -274,5 +416,10 @@ class WeekScheduleView @JvmOverloads constructor(
         val minutesInWindow = (minutes - startMinutes).coerceIn(0, endMinutes - startMinutes)
         val y = headerHeightPx + minutesInWindow * (hourHeightPx / 60f)
         return y.toInt()
+    }
+
+    private fun formatTimeRange(s: LocalTime, e: LocalTime): String {
+        fun fmt(t: LocalTime) = String.format(Locale.getDefault(), "%02d:%02d", t.hour, t.minute)
+        return fmt(s) + "–" + fmt(e)
     }
 }

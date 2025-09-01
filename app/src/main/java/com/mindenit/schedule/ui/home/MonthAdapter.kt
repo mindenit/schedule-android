@@ -6,10 +6,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.color.MaterialColors
 import com.mindenit.schedule.R
 import java.time.LocalDate
 
@@ -72,8 +73,8 @@ class MonthAdapter(
 
         // Initialize cached values once
         if (primaryColor == null) {
-            primaryColor = MaterialColors.getColor(v, com.google.android.material.R.attr.colorPrimary)
-            onPrimaryColor = MaterialColors.getColor(v, com.google.android.material.R.attr.colorOnPrimary)
+            primaryColor = ContextCompat.getColor(v.context, R.color.purple_500)
+            onPrimaryColor = ContextCompat.getColor(v.context, android.R.color.white)
             todaySize = dpToPx(v, 28f)
 
             todayBackground = GradientDrawable().apply {
@@ -126,16 +127,30 @@ class MonthAdapter(
         } else {
             // Reset to default appearance efficiently
             holder.dayNumber.background = null
-            holder.dayNumber.setTextColor(MaterialColors.getColor(holder.itemView, com.google.android.material.R.attr.colorOnSurface))
+            holder.dayNumber.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.calendar_on_background))
 
             // Restore original layout params instead of creating new ones
             holder.dayNumber.layoutParams = holder.originalLayoutParams
         }
 
-        // Optimize events container - only clear if there are events to show
+        // Render a compact badge with the number of events (if any)
         if (item.eventCount > 0) {
-            holder.eventsContainer.removeAllViews()
-            // Future: add event badges efficiently
+            if (holder.eventsContainer.childCount > 0) holder.eventsContainer.removeAllViews()
+            val ctx = holder.itemView.context
+            val badge = TextView(ctx).apply {
+                text = item.eventCount.toString()
+                setTextColor(ContextCompat.getColor(ctx, android.R.color.white))
+                textSize = 12f
+                setPadding(dpToPx(this, 6f), dpToPx(this, 2f), dpToPx(this, 6f), dpToPx(this, 2f))
+                background = ResourcesCompat.getDrawable(holder.itemView.resources, R.drawable.bg_event_badge_sample, ctx.theme)
+                maxLines = 1
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dpToPx(holder.itemView, 2f)
+                }
+            }
+            holder.eventsContainer.addView(badge)
         } else if (holder.eventsContainer.childCount > 0) {
             holder.eventsContainer.removeAllViews()
         }

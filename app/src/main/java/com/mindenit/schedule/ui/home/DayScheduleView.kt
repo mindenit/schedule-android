@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
 import java.time.LocalDate
@@ -29,7 +30,8 @@ class DayScheduleView @JvmOverloads constructor(
         val title: String,
         val start: LocalDateTime,
         val end: LocalDateTime,
-        val color: Int? = null
+        val color: Int? = null,
+        val meta: Any? = null
     )
 
     private var date: LocalDate = LocalDate.now()
@@ -71,21 +73,28 @@ class DayScheduleView @JvmOverloads constructor(
         color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
         strokeWidth = 2f * density
     }
-    private val headerTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurface)
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics)
-    }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
-    private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val eventTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnPrimary)
+    private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurface)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
+        isFakeBoldText = true
+    }
+    private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
+    private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+    }
+    private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private val tmpRect = RectF()
+    private val hitRects: MutableList<Pair<RectF, DayEvent>> = mutableListOf()
+
+    var onEventClick: ((DayEvent) -> Unit)? = null
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         // Use cached height calculation
@@ -143,9 +152,9 @@ class DayScheduleView @JvmOverloads constructor(
             }
 
             // Draw time labels
-            val label = String.format(java.util.Locale.getDefault(), "%02d:00", hour)
+            val label = String.format(Locale.getDefault(), "%02d:00", hour)
             val tx = timeColWidthPx - 6f * density
-            val ty = y + headerTextPaint.textSize
+            val ty = y + titleTextPaint.textSize
             canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
         }
     }
@@ -170,8 +179,14 @@ class DayScheduleView @JvmOverloads constructor(
     }
 
     private fun drawEvents(canvas: Canvas, gridLeft: Float, gridRight: Float, minuteToY: (Int) -> Float) {
+        hitRects.clear()
         // Only draw if events exist
         if (events.isEmpty()) return
+
+        val corner = 10f * density
+        val horizPad = 8f * density
+        val vertPad = 6f * density
+        val accentW = 4f * density
 
         for (event in events) {
             val startMin = minutesSinceStartOfDay(event.start)
@@ -183,28 +198,90 @@ class DayScheduleView @JvmOverloads constructor(
             val top = minuteToY(topMin)
             val bottom = minuteToY(bottomMin)
 
-            val bgColor = event.color
-                ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimaryContainer)
-            eventPaint.color = bgColor
+            // Background card
             tmpRect.set(
-                gridLeft + 8f * density,
+                gridLeft + horizPad,
                 top + 2f * density,
-                gridRight - 8f * density,
+                gridRight - horizPad,
                 bottom - 2f * density
             )
-            canvas.drawRoundRect(tmpRect, 8f * density, 8f * density, eventPaint)
+            canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
 
-            // Only draw text if there's enough space
-            if (tmpRect.height() > eventTextPaint.textSize * 1.5f) {
-                val text = event.title
-                val textX = tmpRect.left + 6f * density
-                val textY = tmpRect.top + eventTextPaint.textSize + 4f * density
-                val save = canvas.save()
-                canvas.clipRect(tmpRect)
-                canvas.drawText(text, textX, textY, eventTextPaint)
-                canvas.restoreToCount(save)
+            // Accent strip
+            accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
+            val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
+            canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
+
+            // Make hit target inside the card (excluding accent)
+            val hitRect = RectF(tmpRect.left, tmpRect.top, tmpRect.right, tmpRect.bottom)
+            hitRects.add(Pair(hitRect, event))
+
+            // Content paddings
+            val contentLeft = tmpRect.left + accentW + 6f * density
+            val contentRight = tmpRect.right - 6f * density
+            var cursorY = tmpRect.top + vertPad + timeTextPaint.textSize
+
+            val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
+            // Draw time
+            canvas.drawText(timeText, contentLeft, cursorY, timeTextPaint)
+
+            // Prepare title/location
+            val parts = event.title.split(" • ", limit = 2)
+            val subject = parts.getOrNull(0) ?: event.title
+            val location = parts.getOrNull(1)
+
+            // Compute available content height
+            val availableHeight = tmpRect.height() - (cursorY - tmpRect.top) - vertPad
+            val neededForTitle = titleTextPaint.textSize * 1.2f
+            val neededForInfo = infoTextPaint.textSize * 1.2f
+
+            // Draw subject if there's space
+            if (availableHeight > neededForTitle * 0.9f) {
+                cursorY += 4f * density + titleTextPaint.textSize
+                drawEllipsized(canvas, subject, contentLeft, contentRight, cursorY, titleTextPaint)
+            }
+            // Draw location if there's space
+            if (location != null && (tmpRect.bottom - cursorY) > neededForInfo + vertPad) {
+                cursorY += 2f * density + infoTextPaint.textSize
+                drawEllipsized(canvas, location, contentLeft, contentRight, cursorY, infoTextPaint)
             }
         }
+    }
+
+    private fun drawEllipsized(canvas: Canvas, text: String, left: Float, right: Float, baselineY: Float, paint: TextPaint) {
+        var drawText = text
+        val maxW = right - left
+        var width = paint.measureText(drawText)
+        if (width > maxW) {
+            // Rough ellipsize: drop chars until it fits and add ellipsis
+            val ellipsis = "\u2026"
+            var end = drawText.length
+            while (end > 0 && width > maxW) {
+                end -= 1
+                drawText = text.substring(0, end) + ellipsis
+                width = paint.measureText(drawText)
+            }
+        }
+        canvas.drawText(drawText, left, baselineY, paint)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_UP) {
+            val x = event.x
+            val y = event.y
+            val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
+            if (hit != null) {
+                onEventClick?.invoke(hit)
+                performClick()
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     private fun minutesSinceStartOfDay(dt: LocalDateTime): Int {
@@ -236,8 +313,8 @@ class DayScheduleView @JvmOverloads constructor(
         return y.toInt()
     }
 
-    private fun drawCenteredText(canvas: Canvas, text: String, cx: Float, cy: Float, paint: TextPaint) {
-        val half = paint.measureText(text) / 2f
-        canvas.drawText(text, cx - half, cy, paint)
+    private fun formatTimeRange(s: LocalTime, e: LocalTime): String {
+        fun fmt(t: LocalTime) = String.format(Locale.getDefault(), "%02d:%02d", t.hour, t.minute)
+        return fmt(s) + "–" + fmt(e)
     }
 }

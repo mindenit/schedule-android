@@ -15,6 +15,10 @@ import com.mindenit.schedule.R
 import com.mindenit.schedule.databinding.FragmentHomeBinding
 import java.time.LocalDate
 import androidx.lifecycle.lifecycleScope
+import com.mindenit.schedule.data.EventRepository
+import kotlinx.coroutines.launch
+import androidx.navigation.fragment.findNavController
+import androidx.navigation.NavController
 
 /**
  * Оптимізований HomeFragment з декомпозицією та розумним кешуванням
@@ -40,6 +44,7 @@ class HomeFragment : Fragment() {
     }
 
     private val logTag = "HomeFragment"
+    private var navDestListener: NavController.OnDestinationChangedListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,10 +82,31 @@ class HomeFragment : Fragment() {
         Log.d(logTag, "onViewCreated: start")
         super.onViewCreated(view, savedInstanceState)
 
-        // Ініці��лізуємо компоненти після створення binding та наявності viewLifecycleOwner
+        // Prefetch events cache for current month (once per day) before rendering
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                Log.d(logTag, "Starting prefetch for current month: ${calendarState.selectedYearMonth}")
+                EventRepository.ensureMonthCached(requireContext(), calendarState.selectedYearMonth)
+                Log.d(logTag, "Prefetch completed for current month")
+            } catch (e: Throwable) {
+                Log.e(logTag, "Failed to prefetch current month", e)
+                /* keep old cache */
+            }
+        }
+
+        // Ініціалізуємо компоненти після створення binding та наявності viewLifecycleOwner
         calendarLoader = CalendarLoader(binding, viewLifecycleOwner.lifecycleScope)
-        calendarManager = CalendarManager(binding, calendarState, calendarLoader)
+        calendarManager = CalendarManager(binding, calendarState, calendarLoader, viewLifecycleOwner.lifecycleScope)
         calendarNavigator = CalendarNavigator(this, calendarState, calendarManager, calendarLoader)
+        // Update header when user swipes pages
+        calendarManager.onHeaderUpdate = { calendarNavigator.updateTitle() }
+        // Also re-apply title after NavigationUI sets destination label
+        navDestListener = NavController.OnDestinationChangedListener { _, dest, _ ->
+            if (dest.id == R.id.navigation_home) {
+                calendarNavigator.updateTitle()
+            }
+        }
+        findNavController().addOnDestinationChangedListener(navDestListener!!)
 
         setupBackNavigation()
         applyDefaultViewMode()
@@ -167,12 +193,12 @@ class HomeFragment : Fragment() {
 
         if (_binding == null) return
 
-        // КЛЮЧОВА ОПТИМІЗАЦІЯ: перевіряємо чи дійсно потрібен ререндер
+        // КЛЮЧОВА ОПТИМІЗАЦІЯ: перевіряємо чи дійсно потрібен ре��енд��р
         if (calendarState.shouldRerenderCalendar()) {
             Log.d(logTag, "onResume: schedule changed, force rerendering")
             renderCurrentMode()
         } else if (calendarState.hasEverBeenInitialized) {
-            // Швидке відновлення без ререндеру
+            // Швидке відно��лення без ререндеру
             Log.d(logTag, "onResume: fast restore - no schedule changes")
             val restored = calendarNavigator.fastRestore()
             if (!restored && calendarState.hasActiveSchedule) {
@@ -229,6 +255,8 @@ class HomeFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         // Очищуємо ресурси
+        navDestListener?.let { findNavController().removeOnDestinationChangedListener(it) }
+        navDestListener = null
         calendarManager.cleanup()
         calendarState.clearCache()
         _binding = null

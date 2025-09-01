@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+            tools:text="Вища математика"/>
+
+        <TextView
+            android:id="@+id/subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            tools:text="Математичний аналіз"/>
+
+        <!-- Date row -->
+        <TextView
+            android:id="@+id/date_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:drawableStart="@android:drawable/ic_menu_my_calendar"
+            android:drawablePadding="8dp"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            tools:text="Пн, 2 вер"/>
+
+        <!-- Time row -->
+        <TextView
+            android:id="@+id/time_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:drawableStart="@android:drawable/ic_lock_idle_alarm"
+            android:drawablePadding="8dp"
+            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+            tools:text="09:00–10:20"/>
+
+        <!-- Meta: type chip + auditorium row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/type_chip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                tools:text="Лекція"/>
+
+            <TextView
+                android:id="@+id/auditorium_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:drawableStart="@android:drawable/ic_dialog_map"
+                android:drawablePadding="6dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                tools:text="Ауд. 101"/>
+        </LinearLayout>
+
+        <!-- Teachers -->
+        <TextView
+            android:id="@+id/label_teachers"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:text="@string/label_teachers"/>
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/teachers_chips"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:clickable="false"/>
+
+        <TextView
+            android:id="@+id/teacher_ids"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            tools:text="ID викладачів: 5, 9"/>
+
+        <!-- Groups -->
+        <TextView
+            android:id="@+id/label_groups"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:text="@string/label_groups"/>
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/groups_chips"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:clickable="false"/>
+
+        <TextView
+            android:id="@+id/group_ids"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            tools:text="ID груп: 11, 12, 14"/>
+
+    </LinearLayout>
+</ScrollView>

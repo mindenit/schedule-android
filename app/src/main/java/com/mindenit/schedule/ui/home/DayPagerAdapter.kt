@@ -10,7 +10,9 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 class DayPagerAdapter(
-    private val baseDate: LocalDate
+    private val baseDate: LocalDate,
+    private val eventsProvider: (LocalDate) -> List<DayScheduleView.DayEvent>,
+    private val onEventClicked: (DayScheduleView.DayEvent) -> Unit
 ) : RecyclerView.Adapter<DayPagerAdapter.DayPageVH>() {
 
     companion object {
@@ -28,18 +30,17 @@ class DayPagerAdapter(
     override fun onBindViewHolder(holder: DayPageVH, position: Int) {
         val diff = position - START_INDEX
         val date = baseDate.plusDays(diff.toLong())
-        holder.bind(date)
+        holder.bind(date, eventsProvider(date), onEventClicked)
     }
 
     class DayPageVH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val scroll: NestedScrollView = itemView.findViewById(R.id.day_scroll)
         private val dayView: DayScheduleView = itemView.findViewById(R.id.day_view)
-        private var currentDate: LocalDate? = null
 
-        fun bind(date: LocalDate) {
+        fun bind(date: LocalDate, events: List<DayScheduleView.DayEvent>, onEventClicked: (DayScheduleView.DayEvent) -> Unit) {
             // Force update even if it's the same date to ensure visibility after tab switching
-            dayView.setDay(date, emptyList())
-            currentDate = date
+            dayView.setDay(date, events)
+            dayView.onEventClick = onEventClicked
 
             scroll.post {
                 val nowY = dayView.getScrollYForTime(LocalTime.now())
