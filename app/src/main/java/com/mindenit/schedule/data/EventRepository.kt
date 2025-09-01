@@ -25,6 +25,10 @@ object EventRepository {
     private fun cacheKey(type: ScheduleType, id: Long): String = "${type}_${id}"
     private fun monthKey(type: ScheduleType, id: Long, ym: YearMonth): String = cacheKey(type, id) + "_" + ym.toString()
 
+    // In-memory parsed cache to avoid repeated JSON parsing and mapping
+    private data class MonthMem(val stamp: String?, val events: List<Event>)
+    private val memory = mutableMapOf<String, MonthMem>()
+
     suspend fun ensureMonthCached(context: Context, ym: YearMonth) {
         val storage = SchedulesStorage(context)
         val active = storage.getActive()
@@ -73,6 +77,11 @@ object EventRepository {
                 putString(KEY_DAY + monthKey, today.toString())
             }
 
+            // Invalidate memory cache so it'll be rebuilt on next access
+            synchronized(memory) {
+                memory.remove(monthKey)
+            }
+
             Log.d(TAG, "Data cached successfully")
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to fetch data from API", e)
@@ -110,10 +119,29 @@ object EventRepository {
         }
     }
 
+    // New: fast month-level events read with in-memory caching of parsed domain events
+    fun getEventsForMonth(context: Context, ym: YearMonth): List<Event> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyList()
+        val mKey = monthKey(active.first, active.second, ym)
+        val stamp = prefs(context).getString(KEY_DAY + mKey, null)
+        synchronized(memory) {
+            val mem = memory[mKey]
+            if (mem != null && mem.stamp == stamp) {
+                return mem.events
+            }
+        }
+        val dtos = loadCachedDtos(context, ym)
+        val domain = dtos.map { it.toDomain() }.sortedBy { it.start }
+        synchronized(memory) {
+            memory[mKey] = MonthMem(stamp, domain)
+        }
+        return domain
+    }
+
     fun getEventsForDate(context: Context, date: LocalDate): List<Event> {
         val ym = YearMonth.from(date)
-        val events = loadCachedDtos(context, ym)
-            .map { it.toDomain() }
+        val events = getEventsForMonth(context, ym)
             .filter { !it.start.toLocalDate().isAfter(date) && !it.end.toLocalDate().isBefore(date) }
             .sortedBy { it.start }
 
@@ -125,13 +153,12 @@ object EventRepository {
         val end = startOfWeek.plusDays(6)
         val ymStart = YearMonth.from(startOfWeek)
         val ymEnd = YearMonth.from(end)
-        val dtos = if (ymStart == ymEnd) {
-            loadCachedDtos(context, ymStart)
+        val domain = if (ymStart == ymEnd) {
+            getEventsForMonth(context, ymStart)
         } else {
-            loadCachedDtos(context, ymStart) + loadCachedDtos(context, ymEnd)
+            getEventsForMonth(context, ymStart) + getEventsForMonth(context, ymEnd)
         }
-        val events = dtos
-            .map { it.toDomain() }
+        val events = domain
             .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
             .sortedBy { it.start }
 
@@ -147,6 +174,7 @@ object EventRepository {
 
     fun clearAll(context: Context) {
         prefs(context).edit { clear() }
+        synchronized(memory) { memory.clear() }
     }
 
     fun getSubjectNamesFromCache(context: Context): Map<Long, String> {

@@ -26,7 +26,18 @@ class MonthPagerAdapter(
         val START_INDEX = TOTAL_MONTHS / 2
     }
 
+    init {
+        setHasStableIds(true)
+    }
+
     override fun getItemCount(): Int = TOTAL_MONTHS
+
+    override fun getItemId(position: Int): Long {
+        val diff = position - START_INDEX
+        val ym = baseYearMonth.plusMonths(diff.toLong())
+        // Stable ID based on year and month to help RV caching across small binds
+        return (ym.year * 12L + ym.monthValue).toLong()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MonthPageVH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_month_page, parent, false)
@@ -56,6 +67,8 @@ class MonthPagerAdapter(
                 grid.layoutManager = GridLayoutManager(itemView.context, 7)
                 grid.setHasFixedSize(true)
                 grid.itemAnimator = null // disable animations for performance
+                // Precreate and cache all children within a page to minimize churn
+                grid.setItemViewCacheSize(42)
                 isLayoutManagerSet = true
             }
 
@@ -98,7 +111,8 @@ class MonthPagerAdapter(
             var d = start
             while (!d.isAfter(end)) {
                 val inCurrent = d.month == yearMonth.month
-                val badges = badgesProvider(d)
+                // Only compute badges for current month cells to reduce work
+                val badges = if (inCurrent) badgesProvider(d) else emptyList()
                 days += CalendarDay(d, inCurrentMonth = inCurrent, badges = badges)
                 d = d.plusDays(1)
             }

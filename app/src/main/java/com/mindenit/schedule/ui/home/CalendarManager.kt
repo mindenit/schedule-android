@@ -40,6 +40,14 @@ class CalendarManager(
     private var cachedMonthIndex: Int = -1
     private var cachedMonthYearMonth: YearMonth? = null
 
+    // Cache of computed badges per month to avoid recomputation on main thread
+    private val monthBadgesCache = object : LinkedHashMap<YearMonth, Map<LocalDate, List<SubjectBadge>>>() {
+        private val maxEntries = 9 // current + neighbors in both directions
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<YearMonth, Map<LocalDate, List<SubjectBadge>>>?): Boolean {
+            return size > maxEntries
+        }
+    }
+
     private val logTag = "CalendarManager"
 
     // Callback to notify that header (title) should be updated
@@ -139,17 +147,20 @@ class CalendarManager(
             pagerBaseYearMonth!!,
             onDateClick,
             badgesProvider = { date ->
-                val events = EventRepository.getEventsForDate(ctx, date)
-                // Group by subject label for one badge per subject
-                val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
-                grouped.entries.sortedBy { it.key }.map { (label, list) ->
-                    // Determine dominant type within the subject for the day
-                    val dominantType = list
-                        .groupingBy { it.type.lowercase() }
-                        .eachCount()
-                        .maxByOrNull { it.value }
-                        ?.key ?: ""
-                    SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+                // Fast path: use precomputed month cache when available
+                val ym = YearMonth.from(date)
+                monthBadgesCache[ym]?.get(date) ?: run {
+                    // Fallback: compute on the fly using in-memory month events cache
+                    val events = EventRepository.getEventsForDate(ctx, date)
+                    val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
+                    grouped.entries.sortedBy { it.key }.map { (label, list) ->
+                        val dominantType = list
+                            .groupingBy { it.type.lowercase() }
+                            .eachCount()
+                            .maxByOrNull { it.value }
+                            ?.key ?: ""
+                        SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+                    }
                 }
             }
         )
@@ -160,6 +171,8 @@ class CalendarManager(
 
         // Ensure cache for initial month and neighbors
         prefetchMonthCache(calendarState.selectedYearMonth)
+        // Additionally precompute badges for current month if possible
+        precomputeMonthBadges(calendarState.selectedYearMonth)
 
         pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -168,6 +181,9 @@ class CalendarManager(
                 calendarState.selectedYearMonth = base.plusMonths(diff.toLong())
                 // Prefetch cache for current and adjacent months
                 prefetchMonthCache(calendarState.selectedYearMonth)
+                precomputeMonthBadges(calendarState.selectedYearMonth)
+                precomputeMonthBadges(calendarState.selectedYearMonth.minusMonths(1))
+                precomputeMonthBadges(calendarState.selectedYearMonth.plusMonths(1))
                 // Notify header update
                 onHeaderUpdate?.invoke()
             }
@@ -359,6 +375,10 @@ class CalendarManager(
             try { EventRepository.ensureMonthCached(ctx, ym.plusMonths(1)) } catch (_: Throwable) {}
 
             if (cachedCurrent) {
+                // Invalidate and recompute month badges for this ym
+                synchronized(monthBadgesCache) { monthBadgesCache.remove(ym) }
+                precomputeMonthBadges(ym)
+
                 withContext(Dispatchers.Main) {
                     Log.d(logTag, "Refreshing UI after cache update")
                     // Refresh visible month page
@@ -378,6 +398,53 @@ class CalendarManager(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Compute badges per day for the given month using in-memory repository cache
+    private fun precomputeMonthBadges(ym: YearMonth) {
+        val ctx = binding.root.context
+        scope.launch(Dispatchers.Default) {
+            try {
+                val events = EventRepository.getEventsForMonth(ctx, ym)
+                if (events.isEmpty()) return@launch
+                val map = mutableMapOf<LocalDate, MutableMap<String, MutableList<com.mindenit.schedule.data.Event>>>()
+                for (ev in events) {
+                    // For days spanning across midnight, attribute to each day in range
+                    var d = ev.start.toLocalDate()
+                    val end = ev.end.toLocalDate()
+                    while (!d.isAfter(end)) {
+                        if (YearMonth.from(d) == ym) {
+                            val label = ev.subject.brief.ifBlank { ev.subject.title }
+                            val byLabel = map.getOrPut(d) { mutableMapOf() }
+                            byLabel.getOrPut(label) { mutableListOf() }.add(ev)
+                        }
+                        d = d.plusDays(1)
+                    }
+                }
+                val result = mutableMapOf<LocalDate, List<SubjectBadge>>()
+                for ((date, groups) in map) {
+                    val badges = groups.entries.sortedBy { it.key }.map { (label, list) ->
+                        val dominantType = list
+                            .groupingBy { it.type.lowercase() }
+                            .eachCount()
+                            .maxByOrNull { it.value }
+                            ?.key ?: ""
+                        SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+                    }
+                    result[date] = badges
+                }
+                synchronized(monthBadgesCache) {
+                    monthBadgesCache[ym] = result
+                }
+                withContext(Dispatchers.Main) {
+                    if (pagerInitialised && YearMonth.from(calendarState.selectedYearMonth) == ym) {
+                        binding.calendarPager.adapter?.notifyItemChanged(binding.calendarPager.currentItem)
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.e(logTag, "Failed to precompute month badges for $ym", t)
             }
         }
     }
@@ -461,5 +528,6 @@ class CalendarManager(
         dayPagerInitialised = false
         cachedMonthIndex = -1
         cachedMonthYearMonth = null
+        synchronized(monthBadgesCache) { monthBadgesCache.clear() }
     }
 }
