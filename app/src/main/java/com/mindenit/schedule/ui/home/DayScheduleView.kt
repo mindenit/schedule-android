@@ -10,6 +10,7 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
+import com.google.android.material.R as MaterialR
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -62,33 +63,33 @@ class DayScheduleView @JvmOverloads constructor(
 
     // Paints with optimized initialization
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
         strokeWidth = hourLineWidth
     }
     private val halfHourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
         alpha = 80
         strokeWidth = 1f
     }
     private val nowLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
         strokeWidth = 2f * density
     }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurface)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorSurfaceContainerHigh)
     }
     private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -189,6 +190,8 @@ class DayScheduleView @JvmOverloads constructor(
         val vertPad = 6f * density
         val accentW = 4f * density
         val colGap = 4f * density
+        val rowGap = 2f * density
+        val badgeTimeGap = 4f * density
 
         // Group events by identical visible slot (topMin..bottomMin)
         val groups = linkedMapOf<Pair<Int, Int>, MutableList<DayEvent>>()
@@ -232,7 +235,7 @@ class DayScheduleView @JvmOverloads constructor(
                 canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
 
                 // Accent strip
-                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
+                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
                 val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
                 canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
 
@@ -240,74 +243,81 @@ class DayScheduleView @JvmOverloads constructor(
                 val hitRect = RectF(tmpRect.left, tmpRect.top, tmpRect.right, tmpRect.bottom)
                 hitRects.add(Pair(hitRect, event))
 
-                // Content paddings
+                // Content paddings and initial baselines
                 val contentLeft = tmpRect.left + accentW + 6f * density
                 val contentRight = tmpRect.right - 6f * density
-                var cursorY = tmpRect.top + vertPad + timeTextPaint.textSize
 
-                val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
-                // Draw time
-                canvas.drawText(timeText, contentLeft, cursorY, timeTextPaint)
+                // Baselines for lines: 1) type badge, 2) time, 3) subject, 4) location
+                val line1Baseline = tmpRect.top + vertPad + timeTextPaint.textSize
+                var line2Baseline = line1Baseline + timeTextPaint.textSize + rowGap // will be adjusted if chip is taller
+                // line3/4 will be computed after final line2Baseline
 
-                // Optional type chip below time
                 val rawType = event.type?.trim().orEmpty()
                 if (rawType.isNotEmpty()) {
+                    // Draw type badge (chip) on line 1
                     val typeColors = EventColorResolver.colorsForType(this@DayScheduleView, rawType)
-                    val padH = 6f * density
-                    val padV = 3f * density
+                    val padH = 8f * density
+                    val padV = 6f * density
                     val chipCorner = 8f * density
-                    // Ellipsize type to fit content width
-                    val maxChipW = (contentRight - contentLeft)
-                    var typeText = rawType
-                    var measured = timeTextPaint.measureText(typeText)
-                    val ellipsis = "\u2026"
-                    while (measured + 2 * padH > maxChipW && typeText.isNotEmpty()) {
-                        typeText = typeText.dropLast(1)
-                        measured = timeTextPaint.measureText(typeText + ellipsis)
-                        if (measured + 2 * padH <= maxChipW) {
-                            typeText += ellipsis
-                            break
+
+                    val baseLabel = shortTypeLabel(rawType)
+                    val maxTextW = (contentRight - contentLeft) - 2 * padH
+                    var shownLabel = baseLabel
+                    var canDrawChip = maxTextW > 0
+                    if (canDrawChip && timeTextPaint.measureText(shownLabel) > maxTextW) {
+                        val count = timeTextPaint.breakText(shownLabel, 0, shownLabel.length, true, maxTextW, null)
+                        val ellipsis = "\u2026"
+                        when {
+                            count >= 2 -> shownLabel = shownLabel.substring(0, count - 1) + ellipsis
+                            count == 1 -> shownLabel = shownLabel.substring(0, 1)
+                            else -> canDrawChip = false
                         }
                     }
-                    val chipTop = cursorY + 2f * density - timeTextPaint.textSize + (timeTextPaint.textSize - (timeTextPaint.textSize))
-                    val chipTextHeight = timeTextPaint.textSize
-                    val chipBottom = chipTop + chipTextHeight + 2 * padV
-                    val chipLeft = contentLeft
-                    val chipRight = (chipLeft + (timeTextPaint.measureText(typeText) + 2 * padH)).coerceAtMost(contentRight)
 
-                    val chipRect = RectF(chipLeft, chipTop, chipRight, chipBottom)
-                    val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = typeColors.background }
-                    canvas.drawRoundRect(chipRect, chipCorner, chipCorner, chipPaint)
-                    val textX = chipLeft + padH
-                    val textY = chipBottom - padV
-                    val old = timeTextPaint.color
-                    timeTextPaint.color = typeColors.foreground
-                    canvas.drawText(typeText, textX, textY, timeTextPaint)
-                    timeTextPaint.color = old
+                    // Default chip bottom if we can't draw
+                    var chipBottom = line1Baseline + padV
 
-                    // Move cursor below chip
-                    cursorY = chipBottom
+                    if (canDrawChip) {
+                        val chipW = timeTextPaint.measureText(shownLabel) + 2 * padH
+                        val chipLeft = contentLeft
+                        val chipTop = line1Baseline - timeTextPaint.textSize + padV
+                        chipBottom = line1Baseline + padV
+                        val chipRect = RectF(chipLeft, chipTop, chipLeft + chipW, chipBottom)
+
+                        val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = typeColors.background }
+                        canvas.drawRoundRect(chipRect, chipCorner, chipCorner, chipPaint)
+
+                        val old = timeTextPaint.color
+                        timeTextPaint.color = typeColors.foreground
+                        canvas.drawText(shownLabel, chipLeft + padH, line1Baseline, timeTextPaint)
+                        timeTextPaint.color = old
+                    }
+                    // Ensure time line is placed below the chip with extra gap
+                    line2Baseline = max(line2Baseline, chipBottom + badgeTimeGap)
                 }
 
-                // Prepare title/location
+                // Line 2: time range
+                val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
+                if (line2Baseline <= tmpRect.bottom - vertPad) {
+                    canvas.drawText(timeText, contentLeft, line2Baseline, timeTextPaint)
+                }
+
+                // Now compute baselines for title and location using final line2Baseline
+                val line3Baseline = line2Baseline + titleTextPaint.textSize + rowGap // subject
+                val line4Baseline = line3Baseline + infoTextPaint.textSize + rowGap  // location
+
+                // Extract subject and location from title (expected format: "subject • location")
                 val parts = event.title.split(" • ", limit = 2)
                 val subject = parts.getOrNull(0) ?: event.title
                 val location = parts.getOrNull(1)
 
-                // Compute available content height
-                val availableHeight = tmpRect.height() - (cursorY - tmpRect.top) - vertPad
-                val neededForTitle = titleTextPaint.textSize * 1.2f
-                val neededForInfo = infoTextPaint.textSize * 1.2f
-
-                // Draw subject if there's space
-                if (availableHeight > neededForTitle * 0.9f) {
-                    cursorY += 4f * density + titleTextPaint.textSize
-                    drawEllipsized(canvas, subject, contentLeft, contentRight, cursorY, titleTextPaint)
+                // Line 3: short subject
+                if (line3Baseline <= tmpRect.bottom - vertPad) {
+                    drawEllipsized(canvas, subject, contentLeft, contentRight, line3Baseline, titleTextPaint)
                 }
-                // Draw location if there's space
-                if (location != null && (tmpRect.bottom - cursorY) > neededForInfo + vertPad) {
-                    cursorY += 2f * density + infoTextPaint.textSize
-                    drawEllipsized(canvas, location, contentLeft, contentRight, cursorY, infoTextPaint)
+                // Line 4: auditorium/location
+                if (!location.isNullOrEmpty() && line4Baseline <= tmpRect.bottom - vertPad) {
+                    drawEllipsized(canvas, location, contentLeft, contentRight, line4Baseline, infoTextPaint)
                 }
             }
         }
@@ -381,5 +391,25 @@ class DayScheduleView @JvmOverloads constructor(
     private fun formatTimeRange(s: LocalTime, e: LocalTime): String {
         fun fmt(t: LocalTime) = String.format(Locale.getDefault(), "%02d:%02d", t.hour, t.minute)
         return fmt(s) + "–" + fmt(e)
+    }
+
+    // Produce a short label for type badges
+    private fun shortTypeLabel(raw: String): String {
+        val t = raw.trim().lowercase()
+        return when {
+            t.contains("лек") || t.contains("lec") || t == "лк" -> "Лек."
+            t.contains("лаб") || t.contains("lab") || t == "лб" -> "Лаб."
+            t.contains("практ") || t.contains("пз") || t.contains("prac") || t == "пр" -> "Практ."
+            t.contains("сем") || t.contains("semin") -> "Сем."
+            t.contains("конс") || t.contains("consult") -> "Конс."
+            t.contains("ісп") || t.contains("екз") || t.contains("экз") || t.contains("exam") -> "Ісп."
+            t.contains("залік") || t.contains("зач") || t.contains("credit") -> "Залік"
+            t.contains("контр") || t.contains("тест") || t.contains("test") || t.contains("quiz") -> "Тест"
+            t.contains("курсов") || t.contains("кп") || t.contains("course") -> "Курсов."
+            t.contains("факульт") || t.contains("elective") || t.contains("optional") -> "Елек."
+            else -> raw.split(" ", limit = 2).firstOrNull()?.let {
+                if (it.length > 12) it.take(9) + "…" else it
+            } ?: raw
+        }
     }
 }

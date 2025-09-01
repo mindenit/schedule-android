@@ -304,7 +304,7 @@ class CalendarManager(
                 events.map {
                     val subj = it.subject.brief.ifBlank { it.subject.title }
                     DayScheduleView.DayEvent(
-                        title = "${it.subject.title} • ${it.auditorium.name}",
+                        title = "$subj • ${it.auditorium.name}",
                         start = it.start,
                         end = it.end,
                         color = darkColorForType(it.type, seed = subj),
