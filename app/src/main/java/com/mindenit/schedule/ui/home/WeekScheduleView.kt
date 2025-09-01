@@ -3,6 +3,7 @@ package com.mindenit.schedule.ui.home
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.text.TextPaint
 import android.util.AttributeSet
@@ -10,6 +11,8 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
+import com.mindenit.schedule.R
+import com.google.android.material.R as MaterialR
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -58,49 +61,49 @@ class WeekScheduleView @JvmOverloads constructor(
 
     // Paints
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOutline)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOutline)
         strokeWidth = hourLineWidth
     }
     private val halfHourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOutline)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOutline)
         alpha = 80 // lighter
         strokeWidth = 1f
     }
     private val weekendFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = withAlpha(MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorSurfaceVariant), 0.10f)
+        color = withAlpha(MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorSurfaceVariant), 0.10f)
         style = Paint.Style.FILL
     }
     private val todayFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = withAlpha(MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorSecondaryContainer), 0.18f)
+        color = withAlpha(MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorSecondaryContainer), 0.18f)
         style = Paint.Style.FILL
     }
     private val nowLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorPrimary)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
         strokeWidth = 2f * density
     }
     private val headerTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurface)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
     }
     private val headerTodayTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorPrimary)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
     }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurface)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 11.5f, resources.displayMetrics)
     }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorSurfaceContainerHigh)
     }
     private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -108,9 +111,14 @@ class WeekScheduleView @JvmOverloads constructor(
 
     // Reusable rect to avoid allocations in onDraw
     private val tmpRect = RectF()
+    // Reusable path for rounded rects (left corners only)
+    private val tmpPath = Path()
 
     // Hit detection rects for events
     private val hitRects: MutableList<Pair<RectF, WeekEvent>> = mutableListOf()
+
+    // Track press within an event to coordinate with parent scroll
+    private var downInsideEvent = false
 
     // Event click listener
     var onEventClick: ((WeekEvent) -> Unit)? = null
@@ -168,7 +176,7 @@ class WeekScheduleView @JvmOverloads constructor(
         // Header: weekday labels
         for (i in 0 until 7) {
             val dayDate = startOfWeek.plusDays(i.toLong())
-            val label = dayDate.format(dayFormatter).uppercase()
+            val label = dayDate.format(dayFormatter).lowercase(Locale.forLanguageTag("uk"))
             val x = gridLeft + i * dayWidth + dayWidth / 2f
             val y = headerHeightPx / 2f + headerTextPaint.textSize / 2f
             val paint = if (dayDate == today) headerTodayTextPaint else headerTextPaint
@@ -267,12 +275,36 @@ class WeekScheduleView @JvmOverloads constructor(
 
                     // Card rect
                     tmpRect.set(left, top + vPad, right, bottom - vPad)
-                    canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
+                    // Draw with only left corners rounded
+                    tmpPath.reset()
+                    tmpPath.addRoundRect(
+                        tmpRect,
+                        floatArrayOf(
+                            corner, corner, // top-left
+                            0f, 0f,         // top-right
+                            0f, 0f,         // bottom-right
+                            corner, corner  // bottom-left
+                        ),
+                        Path.Direction.CW
+                    )
+                    canvas.drawPath(tmpPath, cardPaint)
 
                     // Accent
-                    accentPaint.color = event.color ?: MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary)
+                    accentPaint.color = event.color ?: MaterialColors.getColor(this, MaterialR.attr.colorPrimary)
                     val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
-                    canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
+                    // Match left-only rounding for accent bar
+                    tmpPath.reset()
+                    tmpPath.addRoundRect(
+                        accentRect,
+                        floatArrayOf(
+                            corner, corner, // top-left
+                            0f, 0f,         // top-right
+                            0f, 0f,         // bottom-right
+                            corner, corner  // bottom-left
+                        ),
+                        Path.Direction.CW
+                    )
+                    canvas.drawPath(tmpPath, accentPaint)
 
                     // Hit rect per sub-card
                     hitRects.add(Pair(RectF(tmpRect), event))
@@ -368,23 +400,9 @@ class WeekScheduleView @JvmOverloads constructor(
         return t.hour * 60 + t.minute
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            val x = event.x
-            val y = event.y
-            val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
-            if (hit != null) {
-                onEventClick?.invoke(hit)
-                performClick()
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    override fun performClick(): Boolean {
-        super.performClick()
-        return true
+    private fun withAlpha(color: Int, alpha: Float): Int {
+        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        return (a shl 24) or (color and 0x00FFFFFF)
     }
 
     fun setWeek(start: LocalDate, events: List<WeekEvent>) {
@@ -397,11 +415,6 @@ class WeekScheduleView @JvmOverloads constructor(
     private fun drawCenteredText(canvas: Canvas, text: String, cx: Float, cy: Float, paint: TextPaint) {
         val half = paint.measureText(text) / 2f
         canvas.drawText(text, cx - half, cy, paint)
-    }
-
-    private fun withAlpha(color: Int, alpha: Float): Int {
-        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
-        return (a shl 24) or (color and 0x00FFFFFF)
     }
 
     fun getScrollXForDate(date: LocalDate): Int {
@@ -421,5 +434,40 @@ class WeekScheduleView @JvmOverloads constructor(
     private fun formatTimeRange(s: LocalTime, e: LocalTime): String {
         fun fmt(t: LocalTime) = String.format(Locale.getDefault(), "%02d:%02d", t.hour, t.minute)
         return fmt(s) + "–" + fmt(e)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val x = event.x
+        val y = event.y
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                // If touch starts inside any event, handle it here and keep parent from intercepting
+                downInsideEvent = hitRects.any { it.first.contains(x, y) }
+                if (downInsideEvent) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (downInsideEvent) {
+                    val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
+                    downInsideEvent = false
+                    if (hit != null) {
+                        onEventClick?.invoke(hit)
+                        performClick()
+                        return true
+                    }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                downInsideEvent = false
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 }

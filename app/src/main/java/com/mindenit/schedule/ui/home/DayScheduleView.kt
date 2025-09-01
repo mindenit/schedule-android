@@ -98,14 +98,14 @@ class DayScheduleView @JvmOverloads constructor(
     var onEventClick: ((DayEvent) -> Unit)? = null
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // Use cached height calculation
+        // Use full available height when measured with AT_MOST to avoid empty gap on large screens
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val heightMode = MeasureSpec.getMode(heightMeasureSpec)
         val heightSize = MeasureSpec.getSize(heightMeasureSpec)
         val height = when (heightMode) {
             MeasureSpec.EXACTLY -> heightSize
-            MeasureSpec.AT_MOST -> max(cachedDesiredHeight, suggestedMinimumHeight)
-            else -> cachedDesiredHeight
+            MeasureSpec.AT_MOST -> heightSize // fill available height
+            else -> max(cachedDesiredHeight, suggestedMinimumHeight)
         }
         setMeasuredDimension(width, height)
     }
@@ -117,7 +117,9 @@ class DayScheduleView @JvmOverloads constructor(
         val gridTop = headerHeightPx
         val gridRight = width.toFloat()
 
-        val minutePx = hourHeightPx / 60f
+        // Stretch timeline to occupy the full view height
+        val availableHeight = height.toFloat() - gridTop
+        val minutePx = (availableHeight / (endMinutes - startMinutes).toFloat()).coerceAtLeast(0f)
         fun minuteToY(min: Int): Float = gridTop + (min - startMinutes) * minutePx
 
         // Optimize grid drawing - cache hour calculations
@@ -391,7 +393,10 @@ class DayScheduleView @JvmOverloads constructor(
     fun getScrollYForTime(time: LocalTime): Int {
         val minutes = time.hour * 60 + time.minute
         val minutesInWindow = (minutes - startMinutes).coerceIn(0, endMinutes - startMinutes)
-        val y = headerHeightPx + minutesInWindow * (hourHeightPx / 60f)
+        // Match dynamic scaling used in onDraw
+        val availableHeight = height.toFloat() - headerHeightPx
+        val minutePx = (availableHeight / (endMinutes - startMinutes).toFloat()).coerceAtLeast(0f)
+        val y = headerHeightPx + minutesInWindow * minutePx
         return y.toInt()
     }
 

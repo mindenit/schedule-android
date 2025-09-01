@@ -7,11 +7,15 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.fragment.app.setFragmentResult
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.mindenit.schedule.R
+import com.mindenit.schedule.data.ScheduleEntry
 import com.mindenit.schedule.data.ScheduleType
+import com.mindenit.schedule.data.SchedulesStorage
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -53,7 +57,30 @@ class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(dt)
         } ?: "—"
 
-        // Buttons removed from layout; no actions here.
+        val storage = SchedulesStorage(requireContext())
+
+        // Set active button
+        view.findViewById<View>(R.id.btn_set_active)?.setOnClickListener {
+            storage.setActive(type, id)
+            setFragmentResult(REQUEST_REFRESH, Bundle())
+            dismissAllowingStateLoss()
+        }
+
+        // Delete button with confirmation
+        view.findViewById<View>(R.id.btn_delete)?.setOnClickListener {
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.delete)
+                .setMessage(getString(R.string.delete_link_confirm))
+                .setPositiveButton(R.string.delete) { d, _ ->
+                    val entry = ScheduleEntry(type = type, id = id, name = name)
+                    storage.remove(entry)
+                    setFragmentResult(REQUEST_REFRESH, Bundle())
+                    d.dismiss()
+                    dismissAllowingStateLoss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
     }
 
     companion object {

@@ -27,7 +27,7 @@
                 android:layout_height="24dp"
                 android:layout_marginEnd="12dp"
                 android:contentDescription="@string/label_links"
-                app:srcCompat="@drawable/ic_public_24"
+                app:srcCompat="@drawable/ic_web_24"
                 tools:ignore="VectorDrawableCompat"/>
 
             <LinearLayout

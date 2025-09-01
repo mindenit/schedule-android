@@ -42,28 +42,41 @@
                     android:textColor="?attr/colorOnSurfaceVariant"
                     tools:text="Математичний аналіз"/>
 
-                <LinearLayout
+                <!-- Labeled Type row -->
+                <TextView
+                    android:id="@+id/label_type"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:text="@string/label_type"/>
 
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/type_chip"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="12dp"
-                        tools:text="Лекція"/>
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/type_chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    tools:text="Лекція"/>
 
-                    <TextView
-                        android:id="@+id/auditorium_text"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="?attr/colorOnSurface"
-                        tools:text="Ауд. 101"/>
-                </LinearLayout>
+                <!-- Labeled Auditorium row -->
+                <TextView
+                    android:id="@+id/label_auditorium"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:text="@string/label_auditorium"/>
+
+                <TextView
+                    android:id="@+id/auditorium_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurface"
+                    tools:text="Ауд. 101"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

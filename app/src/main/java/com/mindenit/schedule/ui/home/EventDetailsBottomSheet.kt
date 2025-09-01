@@ -8,10 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.widget.ImageViewCompat
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -27,7 +25,12 @@ import com.mindenit.schedule.R
 import com.mindenit.schedule.data.SubjectLinksStorage
 import com.mindenit.schedule.databinding.BottomsheetEventDetailsBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.color.MaterialColors
+import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class EventDetailsBottomSheet : BottomSheetDialogFragment() {
     private var _binding: BottomsheetEventDetailsBinding? = null
@@ -42,6 +45,12 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
             behavior.isFitToContents = true
             behavior.skipCollapsed = true
             behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        }
+        // Ensure navbar is tinted to surface so it doesn't look transparent behind the sheet
+        dialog.window?.let { w ->
+            w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            val navColor = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorSurface, 0)
+            w.navigationBarColor = navColor
         }
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         return dialog
@@ -164,7 +173,7 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
                 icon.setImageResource(R.drawable.ic_zoom_brand_24)
                 ImageViewCompat.setImageTintList(icon, null)
             } else {
-                icon.setImageResource(R.drawable.ic_public_24)
+                icon.setImageResource(R.drawable.ic_web_24)
                 ImageViewCompat.setImageTintList(icon, null)
             }
 
@@ -230,6 +239,23 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
             .setView(content)
             .create()
 
+        // Avoid navbar see-through on large screens
+        dialog.setOnShowListener {
+            dialog.window?.let { w ->
+                WindowCompat.setDecorFitsSystemWindows(w, true)
+                w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                val navColor = MaterialColors.getColor(requireContext(), com.google.android.material.R.attr.colorSurface, 0)
+                w.navigationBarColor = navColor
+            }
+        }
+
+        // Apply system bottom inset as padding to the content (safety for devices with gesture nav)
+        ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, systemBars.bottom)
+            insets
+        }
+
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnSave.setOnClickListener {
             val title = etTitle.text?.toString()?.trim().orEmpty()
@@ -255,8 +281,6 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
             renderLinks()
         }
 
-        // Remove transparent background to ensure proper Material background
-        // dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         dialog.show()
     }
 
@@ -310,8 +334,10 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
         private const val ARG_SUBJECT_ID = "subject_id"
 
         fun from(event: com.mindenit.schedule.data.Event): EventDetailsBottomSheet {
-            val dfDate = DateTimeFormatter.ofPattern("EEE, d MMM")
-            val dfTime = DateTimeFormatter.ofPattern("HH:mm")
+            // Use Ukrainian locale for date/time formatting (full weekday and month names)
+            val uk = Locale.forLanguageTag("uk")
+            val dfDate = DateTimeFormatter.ofPattern("EEEE, d MMMM", uk)
+            val dfTime = DateTimeFormatter.ofPattern("HH:mm", uk)
             val sameDay = event.start.toLocalDate() == event.end.toLocalDate()
             val date = if (sameDay) {
                 event.start.format(dfDate)

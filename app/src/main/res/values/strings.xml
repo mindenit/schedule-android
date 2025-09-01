@@ -73,4 +73,27 @@
     <string name="delete_link_confirm">Видалити це посилання?</string>
     <string name="brand_google_meet">Google Meet</string>
     <string name="brand_zoom">Zoom</string>
+    <string name="api_ok">API: OK</string>
+    <string name="api_down">API: DOWN</string>
+    <string name="api_unknown">API: Unknown</string>
+    <string name="subject_label">Предмет: %1$s</string>
+    <string name="manage_links_title">Керування посиланнями</string>
+    <string name="manage_links_summary">Перегляд, редагування, імпорт/експорт посилань за предметами</string>
+    <string name="links_manage_screen_title">Посилання</string>
+    <string name="import_links">Імпортувати</string>
+    <string name="export_links">Експортувати</string>
+    <string name="no_links">Немає збережених посилань</string>
+    <string name="select_export_items">Обрати що експортувати</string>
+    <string name="export">Експортувати</string>
+    <string name="import_complete">Імпорт завершено</string>
+    <string name="export_complete">Експорт завершено</string>
+    <string name="import_error">Помилка імпорту</string>
+    <string name="export_error">Помилка експорту</string>
+    <string name="theme_system">Системна</string>
+    <string name="theme_light">Світла</string>
+    <string name="theme_dark">Темна</string>
+    <string name="default_view_month">Місяць</string>
+    <string name="default_view_week">Тиждень</string>
+    <string name="default_view_day">День</string>
+    <string name="label_auditorium">Аудиторія</string>
 </resources>

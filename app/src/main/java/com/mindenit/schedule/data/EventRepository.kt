@@ -144,6 +144,29 @@ object EventRepository {
         Log.d(TAG, "getCountForDate: date=$date, count=$count")
         return count
     }
+
+    fun clearAll(context: Context) {
+        prefs(context).edit { clear() }
+    }
+
+    fun getSubjectNamesFromCache(context: Context): Map<Long, String> {
+        val map = mutableMapOf<Long, String>()
+        val all = prefs(context).all
+        val gson = gson
+        all.forEach { (k, v) ->
+            if (k.startsWith(KEY_DATA) && v is String) {
+                try {
+                    val type = object : com.google.gson.reflect.TypeToken<List<com.mindenit.schedule.network.EventDto>>() {}.type
+                    val events: List<com.mindenit.schedule.network.EventDto> = gson.fromJson(v, type) ?: emptyList()
+                    for (e in events) {
+                        val id = e.subject.id
+                        if (!map.containsKey(id)) map[id] = e.subject.title
+                    }
+                } catch (_: Throwable) { }
+            }
+        }
+        return map
+    }
 }
 
 private fun com.mindenit.schedule.network.EventDto.toDomain(): Event {

@@ -75,6 +75,25 @@ class SubjectLinksStorage(context: Context) {
         if (changed) save(subjectId, list)
     }
 
+    fun getAll(): Map<Long, List<SubjectLink>> {
+        val out = mutableMapOf<Long, List<SubjectLink>>()
+        for ((k, v) in prefs.all) {
+            if (k.startsWith(KEY_PREFIX) && v is String) {
+                val sid = k.removePrefix(KEY_PREFIX).toLongOrNull() ?: continue
+                val list = try {
+                    val type = object : com.google.gson.reflect.TypeToken<List<SubjectLink>>() {}.type
+                    gson.fromJson<List<SubjectLink>>(v, type) ?: emptyList()
+                } catch (_: Throwable) { emptyList() }
+                if (list.isNotEmpty()) out[sid] = list
+            }
+        }
+        return out
+    }
+
+    fun clearAll() {
+        prefs.edit { clear() }
+    }
+
     private fun save(subjectId: Long, list: List<SubjectLink>) {
         val json = gson.toJson(list)
         prefs.edit { putString(key(subjectId), json) }
@@ -85,5 +104,8 @@ class SubjectLinksStorage(context: Context) {
     companion object {
         private const val PREFS = "subject_links"
         private const val KEY_PREFIX = "links_"
+        fun clearAll(context: Context) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { clear() }
+        }
     }
 }

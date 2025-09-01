@@ -21,5 +21,15 @@
         android:id="@+id/navigation_settings"
         android:name="com.mindenit.schedule.ui.settings.SettingsFragment"
         android:label="@string/title_notifications"
-        tools:layout="@layout/fragment_settings" />
+        tools:layout="@layout/fragment_settings">
+        <action
+            android:id="@+id/action_settings_to_manage_links"
+            app:destination="@id/navigation_manage_links" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/navigation_manage_links"
+        android:name="com.mindenit.schedule.ui.settings.ManageLinksFragment"
+        android:label="@string/links_manage_screen_title"
+        tools:layout="@layout/fragment_manage_links" />
 </navigation>
