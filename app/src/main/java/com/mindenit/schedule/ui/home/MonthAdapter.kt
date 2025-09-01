@@ -1,5 +1,6 @@
 package com.mindenit.schedule.ui.home
 
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
@@ -14,10 +15,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.mindenit.schedule.R
 import java.time.LocalDate
 
+// Represents one subject badge in a day cell
+data class SubjectBadge(val label: String, val color: Int)
+
 data class CalendarDay(
     val date: LocalDate,
     val inCurrentMonth: Boolean,
-    val eventCount: Int
+    val badges: List<SubjectBadge>
 ) {
     // Add equals/hashCode for DiffUtil
     override fun equals(other: Any?): Boolean {
@@ -25,13 +29,13 @@ data class CalendarDay(
         if (other !is CalendarDay) return false
         return date == other.date &&
                inCurrentMonth == other.inCurrentMonth &&
-               eventCount == other.eventCount
+               badges == other.badges
     }
 
     override fun hashCode(): Int {
         var result = date.hashCode()
         result = 31 * result + inCurrentMonth.hashCode()
-        result = 31 * result + eventCount
+        result = 31 * result + badges.hashCode()
         return result
     }
 }
@@ -103,8 +107,8 @@ class MonthAdapter(
             holder.itemView.layoutParams = lpItem
         }
 
-        // Optimize accessibility - only set once per bind
-        holder.itemView.contentDescription = "День ${item.date.dayOfMonth}, подій: ${item.eventCount}"
+        // Accessibility description with total badges
+        holder.itemView.contentDescription = "День ${item.date.dayOfMonth}, позначок: ${item.badges.size}"
 
         // Set click listener only once per ViewHolder
         if (!holder.container.hasOnClickListeners()) {
@@ -113,7 +117,7 @@ class MonthAdapter(
             }
         }
 
-        // Optimize today highlighting with cached values
+        // Today highlighting
         val today = LocalDate.now()
         if (item.date == today) {
             holder.dayNumber.background = todayBackground
@@ -133,26 +137,43 @@ class MonthAdapter(
             holder.dayNumber.layoutParams = holder.originalLayoutParams
         }
 
-        // Render a compact badge with the number of events (if any)
-        if (item.eventCount > 0) {
-            if (holder.eventsContainer.childCount > 0) holder.eventsContainer.removeAllViews()
+        // Render vertical badges per subject-type (label only, colored background)
+        if (holder.eventsContainer.childCount > 0) holder.eventsContainer.removeAllViews()
+        if (item.badges.isNotEmpty()) {
             val ctx = holder.itemView.context
-            val badge = TextView(ctx).apply {
-                text = item.eventCount.toString()
-                setTextColor(ContextCompat.getColor(ctx, android.R.color.white))
-                textSize = 12f
-                setPadding(dpToPx(this, 6f), dpToPx(this, 2f), dpToPx(this, 6f), dpToPx(this, 2f))
-                background = ResourcesCompat.getDrawable(holder.itemView.resources, R.drawable.bg_event_badge_sample, ctx.theme)
-                maxLines = 1
-                isSingleLine = true
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dpToPx(holder.itemView, 2f)
+            val corner = dpToPx(holder.itemView, 4f).toFloat()
+            val strokeW = dpToPx(holder.itemView, 1f)
+            val strokeColor = android.graphics.Color.parseColor("#33000000") // subtle 20% black
+            for (badge in item.badges) {
+                val row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    // Programmatic rounded background per badge color
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = corner
+                        setColor(badge.color)
+                        setStroke(strokeW, strokeColor)
+                    }
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = dpToPx(holder.itemView, 2f)
+                    }
+                    setPadding(dpToPx(this, 6f), dpToPx(this, 3f), dpToPx(this, 6f), dpToPx(this, 3f))
+                    gravity = android.view.Gravity.CENTER_VERTICAL
                 }
+
+                val label = TextView(ctx).apply {
+                    text = badge.label
+                    setTextColor(ContextCompat.getColor(ctx, android.R.color.white))
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    maxLines = 1
+                    isSingleLine = true
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                row.addView(label)
+                holder.eventsContainer.addView(row)
             }
-            holder.eventsContainer.addView(badge)
-        } else if (holder.eventsContainer.childCount > 0) {
-            holder.eventsContainer.removeAllViews()
         }
     }
 

@@ -31,7 +31,8 @@ class DayScheduleView @JvmOverloads constructor(
         val start: LocalDateTime,
         val end: LocalDateTime,
         val color: Int? = null,
-        val meta: Any? = null
+        val meta: Any? = null,
+        val type: String? = null
     )
 
     private var date: LocalDate = LocalDate.now()
@@ -187,63 +188,127 @@ class DayScheduleView @JvmOverloads constructor(
         val horizPad = 8f * density
         val vertPad = 6f * density
         val accentW = 4f * density
+        val colGap = 4f * density
 
+        // Group events by identical visible slot (topMin..bottomMin)
+        val groups = linkedMapOf<Pair<Int, Int>, MutableList<DayEvent>>()
         for (event in events) {
             val startMin = minutesSinceStartOfDay(event.start)
             val endMin = minutesSinceStartOfDay(event.end)
             val topMin = startMin.coerceAtLeast(startMinutes)
             val bottomMin = endMin.coerceAtMost(endMinutes)
             if (bottomMin <= startMinutes || topMin >= endMinutes) continue
+            val key = Pair(topMin, bottomMin)
+            groups.getOrPut(key) { mutableListOf() }.add(event)
+        }
 
+        for ((key, list) in groups) {
+            if (list.isEmpty()) continue
+            val (topMin, bottomMin) = key
             val top = minuteToY(topMin)
             val bottom = minuteToY(bottomMin)
 
-            // Background card
-            tmpRect.set(
-                gridLeft + horizPad,
-                top + 2f * density,
-                gridRight - horizPad,
-                bottom - 2f * density
-            )
-            canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
+            val slotLeft = gridLeft + horizPad
+            val slotRight = gridRight - horizPad
 
-            // Accent strip
-            accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
-            val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
-            canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
+            val cols = list.size
+            val totalGap = if (cols > 1) colGap * (cols - 1) else 0f
+            val perW = if (cols > 1) ((slotRight - slotLeft - totalGap) / cols).coerceAtLeast(8f * density) else (slotRight - slotLeft)
 
-            // Make hit target inside the card (excluding accent)
-            val hitRect = RectF(tmpRect.left, tmpRect.top, tmpRect.right, tmpRect.bottom)
-            hitRects.add(Pair(hitRect, event))
+            // Stable order (by title then start)
+            val sorted = list.sortedWith(compareBy({ it.title }, { it.start }))
 
-            // Content paddings
-            val contentLeft = tmpRect.left + accentW + 6f * density
-            val contentRight = tmpRect.right - 6f * density
-            var cursorY = tmpRect.top + vertPad + timeTextPaint.textSize
+            for ((idx, event) in sorted.withIndex()) {
+                val left = if (cols > 1) slotLeft + idx * (perW + colGap) else slotLeft
+                val right = if (cols > 1) (left + perW).coerceAtMost(slotRight) else slotRight
 
-            val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
-            // Draw time
-            canvas.drawText(timeText, contentLeft, cursorY, timeTextPaint)
+                // Background card
+                tmpRect.set(
+                    left,
+                    top + 2f * density,
+                    right,
+                    bottom - 2f * density
+                )
+                canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
 
-            // Prepare title/location
-            val parts = event.title.split(" • ", limit = 2)
-            val subject = parts.getOrNull(0) ?: event.title
-            val location = parts.getOrNull(1)
+                // Accent strip
+                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
+                val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
+                canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
 
-            // Compute available content height
-            val availableHeight = tmpRect.height() - (cursorY - tmpRect.top) - vertPad
-            val neededForTitle = titleTextPaint.textSize * 1.2f
-            val neededForInfo = infoTextPaint.textSize * 1.2f
+                // Make hit target inside the card (excluding accent)
+                val hitRect = RectF(tmpRect.left, tmpRect.top, tmpRect.right, tmpRect.bottom)
+                hitRects.add(Pair(hitRect, event))
 
-            // Draw subject if there's space
-            if (availableHeight > neededForTitle * 0.9f) {
-                cursorY += 4f * density + titleTextPaint.textSize
-                drawEllipsized(canvas, subject, contentLeft, contentRight, cursorY, titleTextPaint)
-            }
-            // Draw location if there's space
-            if (location != null && (tmpRect.bottom - cursorY) > neededForInfo + vertPad) {
-                cursorY += 2f * density + infoTextPaint.textSize
-                drawEllipsized(canvas, location, contentLeft, contentRight, cursorY, infoTextPaint)
+                // Content paddings
+                val contentLeft = tmpRect.left + accentW + 6f * density
+                val contentRight = tmpRect.right - 6f * density
+                var cursorY = tmpRect.top + vertPad + timeTextPaint.textSize
+
+                val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
+                // Draw time
+                canvas.drawText(timeText, contentLeft, cursorY, timeTextPaint)
+
+                // Optional type chip below time
+                val rawType = event.type?.trim().orEmpty()
+                if (rawType.isNotEmpty()) {
+                    val typeColors = EventColorResolver.colorsForType(this@DayScheduleView, rawType)
+                    val padH = 6f * density
+                    val padV = 3f * density
+                    val chipCorner = 8f * density
+                    // Ellipsize type to fit content width
+                    val maxChipW = (contentRight - contentLeft)
+                    var typeText = rawType
+                    var measured = timeTextPaint.measureText(typeText)
+                    val ellipsis = "\u2026"
+                    while (measured + 2 * padH > maxChipW && typeText.isNotEmpty()) {
+                        typeText = typeText.dropLast(1)
+                        measured = timeTextPaint.measureText(typeText + ellipsis)
+                        if (measured + 2 * padH <= maxChipW) {
+                            typeText += ellipsis
+                            break
+                        }
+                    }
+                    val chipTop = cursorY + 2f * density - timeTextPaint.textSize + (timeTextPaint.textSize - (timeTextPaint.textSize))
+                    val chipTextHeight = timeTextPaint.textSize
+                    val chipBottom = chipTop + chipTextHeight + 2 * padV
+                    val chipLeft = contentLeft
+                    val chipRight = (chipLeft + (timeTextPaint.measureText(typeText) + 2 * padH)).coerceAtMost(contentRight)
+
+                    val chipRect = RectF(chipLeft, chipTop, chipRight, chipBottom)
+                    val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = typeColors.background }
+                    canvas.drawRoundRect(chipRect, chipCorner, chipCorner, chipPaint)
+                    val textX = chipLeft + padH
+                    val textY = chipBottom - padV
+                    val old = timeTextPaint.color
+                    timeTextPaint.color = typeColors.foreground
+                    canvas.drawText(typeText, textX, textY, timeTextPaint)
+                    timeTextPaint.color = old
+
+                    // Move cursor below chip
+                    cursorY = chipBottom
+                }
+
+                // Prepare title/location
+                val parts = event.title.split(" • ", limit = 2)
+                val subject = parts.getOrNull(0) ?: event.title
+                val location = parts.getOrNull(1)
+
+                // Compute available content height
+                val availableHeight = tmpRect.height() - (cursorY - tmpRect.top) - vertPad
+                val neededForTitle = titleTextPaint.textSize * 1.2f
+                val neededForInfo = infoTextPaint.textSize * 1.2f
+
+                // Draw subject if there's space
+                if (availableHeight > neededForTitle * 0.9f) {
+                    cursorY += 4f * density + titleTextPaint.textSize
+                    drawEllipsized(canvas, subject, contentLeft, contentRight, cursorY, titleTextPaint)
+                }
+                // Draw location if there's space
+                if (location != null && (tmpRect.bottom - cursorY) > neededForInfo + vertPad) {
+                    cursorY += 2f * density + infoTextPaint.textSize
+                    drawEllipsized(canvas, location, contentLeft, contentRight, cursorY, infoTextPaint)
+                }
             }
         }
     }

@@ -17,7 +17,7 @@ import java.time.temporal.TemporalAdjusters
 class MonthPagerAdapter(
     private val baseYearMonth: YearMonth,
     private val onDayClick: (LocalDate) -> Unit,
-    private val countProvider: (LocalDate) -> Int
+    private val badgesProvider: (LocalDate) -> List<SubjectBadge>
 ) : RecyclerView.Adapter<MonthPagerAdapter.MonthPageVH>() {
 
     companion object {
@@ -36,7 +36,7 @@ class MonthPagerAdapter(
     override fun onBindViewHolder(holder: MonthPageVH, position: Int) {
         val diff = position - START_INDEX
         val ym = baseYearMonth.plusMonths(diff.toLong())
-        holder.bind(ym, onDayClick, countProvider)
+        holder.bind(ym, onDayClick, badgesProvider)
     }
 
     class MonthPageVH(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -45,7 +45,7 @@ class MonthPagerAdapter(
         private var currentYearMonth: YearMonth? = null
         private var isLayoutManagerSet = false
 
-        fun bind(ym: YearMonth, onDayClick: (LocalDate) -> Unit, countProvider: (LocalDate) -> Int) {
+        fun bind(ym: YearMonth, onDayClick: (LocalDate) -> Unit, badgesProvider: (LocalDate) -> List<SubjectBadge>) {
             // Only regenerate data if month actually changed
             if (currentYearMonth == ym && adapter != null) {
                 return
@@ -59,7 +59,7 @@ class MonthPagerAdapter(
                 isLayoutManagerSet = true
             }
 
-            val data = generateMonthGrid(ym, countProvider)
+            val data = generateMonthGrid(ym, badgesProvider)
 
             // Create adapter only once and reuse it
             val monthAdapter = adapter ?: MonthAdapter(onDayClick).also {
@@ -89,7 +89,7 @@ class MonthPagerAdapter(
 
         private data class MonthData(val days: List<CalendarDay>, val rows: Int)
 
-        private fun generateMonthGrid(yearMonth: YearMonth, countProvider: (LocalDate) -> Int): MonthData {
+        private fun generateMonthGrid(yearMonth: YearMonth, badgesProvider: (LocalDate) -> List<SubjectBadge>): MonthData {
             val firstOfMonth = yearMonth.atDay(1)
             val lastOfMonth = yearMonth.atEndOfMonth()
             val start = firstOfMonth.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -98,8 +98,8 @@ class MonthPagerAdapter(
             var d = start
             while (!d.isAfter(end)) {
                 val inCurrent = d.month == yearMonth.month
-                val cnt = countProvider(d)
-                days += CalendarDay(d, inCurrentMonth = inCurrent, eventCount = cnt)
+                val badges = badgesProvider(d)
+                days += CalendarDay(d, inCurrentMonth = inCurrent, badges = badges)
                 d = d.plusDays(1)
             }
             val rows = days.size / 7

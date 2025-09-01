@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.graphics.Color
 
 /**
  * Управління календарними pager-ами та їх ініціалізацією
@@ -137,7 +138,20 @@ class CalendarManager(
         monthPagerAdapter = MonthPagerAdapter(
             pagerBaseYearMonth!!,
             onDateClick,
-            countProvider = { date -> EventRepository.getCountForDate(ctx, date) }
+            badgesProvider = { date ->
+                val events = EventRepository.getEventsForDate(ctx, date)
+                // Group by subject label for one badge per subject
+                val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
+                grouped.entries.sortedBy { it.key }.map { (label, list) ->
+                    // Determine dominant type within the subject for the day
+                    val dominantType = list
+                        .groupingBy { it.type.lowercase() }
+                        .eachCount()
+                        .maxByOrNull { it.value }
+                        ?.key ?: ""
+                    SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+                }
+            }
         )
         pager.adapter = monthPagerAdapter
         pager.offscreenPageLimit = 1
@@ -161,6 +175,71 @@ class CalendarManager(
         pagerInitialised = true
     }
 
+    private fun darkColorForType(typeLower: String, seed: String? = null): Int {
+        val t = typeLower.trim().lowercase()
+        fun hasAny(vararg keys: String) = keys.any { k -> t.contains(k) }
+        return when {
+            // Лекція (lecture)
+            hasAny("лек", "lec", "lecture", "лк") -> android.graphics.Color.parseColor("#0B8043") // green 700
+            // Лабораторна (lab)
+            hasAny("лаб", "lab", "laboratory", "лб") -> android.graphics.Color.parseColor("#1E3A8A") // indigo 800
+            // Практика (practice, PZ)
+            hasAny("практ", "пз", "prac", "practice", " pr ", " pr.") -> android.graphics.Color.parseColor("#B45309") // orange 700
+            // Семінар (seminar)
+            hasAny("сем", "semin") -> android.graphics.Color.parseColor("#6A1B9A") // purple 800
+            // Консультація (consultation)
+            hasAny("конс", "consult") -> android.graphics.Color.parseColor("#006064") // cyan 900
+            // Іспит (exam)
+            hasAny("ісп", "екз", "экз", "exam", "examin") -> android.graphics.Color.parseColor("#C62828") // red 800
+            // Залік (credit)
+            hasAny("залік", "зач", "credit", "pass/fail", "passfail") -> android.graphics.Color.parseColor("#00695C") // teal 800
+            // Контрольна/Тест
+            hasAny("контр", "тест", "test", "quiz") -> android.graphics.Color.parseColor("#FF6F00") // amber 800
+            // Курсова/Курсовий проєкт
+            hasAny("курсов", "кп", "кпп", "course work", "course project", "cw ", " cp ") -> android.graphics.Color.parseColor("#4E342E") // brown 800
+            // Факультатив/Електив
+            hasAny("факульт", "фак ", "elective", "optional") -> android.graphics.Color.parseColor("#1565C0") // blue 700
+            t.isNotEmpty() -> {
+                // Unknown type: pick from a spaced dark palette based on hash
+                val palette = intArrayOf(
+                    android.graphics.Color.parseColor("#0B8043"), // green 700
+                    android.graphics.Color.parseColor("#1E3A8A"), // indigo 800
+                    android.graphics.Color.parseColor("#B45309"), // orange 700
+                    android.graphics.Color.parseColor("#6A1B9A"), // purple 800
+                    android.graphics.Color.parseColor("#C62828"), // red 800
+                    android.graphics.Color.parseColor("#00695C"), // teal 800
+                    android.graphics.Color.parseColor("#4E342E"), // brown 800
+                    android.graphics.Color.parseColor("#1565C0"), // blue 700
+                    android.graphics.Color.parseColor("#2E7D32"), // green 800
+                    android.graphics.Color.parseColor("#AD1457"), // pink 800
+                    android.graphics.Color.parseColor("#283593"), // indigo 800 (alt)
+                    android.graphics.Color.parseColor("#00838F")  // cyan 800
+                )
+                val idx = kotlin.math.abs(t.hashCode()) % palette.size
+                palette[idx]
+            }
+            else -> {
+                val palette = intArrayOf(
+                    android.graphics.Color.parseColor("#0B8043"),
+                    android.graphics.Color.parseColor("#1E3A8A"),
+                    android.graphics.Color.parseColor("#B45309"),
+                    android.graphics.Color.parseColor("#6A1B9A"),
+                    android.graphics.Color.parseColor("#C62828"),
+                    android.graphics.Color.parseColor("#00695C"),
+                    android.graphics.Color.parseColor("#4E342E"),
+                    android.graphics.Color.parseColor("#1565C0"),
+                    android.graphics.Color.parseColor("#2E7D32"),
+                    android.graphics.Color.parseColor("#AD1457"),
+                    android.graphics.Color.parseColor("#283593"),
+                    android.graphics.Color.parseColor("#00838F")
+                )
+                val s = seed?.lowercase().orEmpty()
+                val idx = if (s.isNotEmpty()) kotlin.math.abs(s.hashCode()) % palette.size else 0
+                palette[idx]
+            }
+        }
+    }
+
     private fun setupWeekPagerIfNeeded() {
         if (weekPagerInitialised) return
         Log.d(logTag, "setupWeekPagerIfNeeded: init with startOfWeek")
@@ -179,7 +258,7 @@ class CalendarManager(
                         title = "$subj • $aud",
                         start = it.start,
                         end = it.end,
-                        color = null,
+                        color = darkColorForType(it.type, seed = subj),
                         meta = it
                     )
                 }
@@ -196,7 +275,7 @@ class CalendarManager(
         onHeaderUpdate?.invoke()
 
         // Ensure cache for the month of initial selected date
-        prefetchMonthCache(java.time.YearMonth.from(calendarState.selectedDate))
+        prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
 
         pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -204,7 +283,7 @@ class CalendarManager(
                 val diff = position - WeekPagerAdapter.START_INDEX
                 calendarState.selectedDate = base.plusWeeks(diff.toLong())
                 // Prefetch month cache for the newly visible week
-                prefetchMonthCache(java.time.YearMonth.from(calendarState.selectedDate))
+                prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
                 // Notify header update
                 onHeaderUpdate?.invoke()
             }
@@ -223,12 +302,14 @@ class CalendarManager(
             eventsProvider = { date ->
                 val events = EventRepository.getEventsForDate(ctx, date)
                 events.map {
+                    val subj = it.subject.brief.ifBlank { it.subject.title }
                     DayScheduleView.DayEvent(
                         title = "${it.subject.title} • ${it.auditorium.name}",
                         start = it.start,
                         end = it.end,
-                        color = null,
-                        meta = it
+                        color = darkColorForType(it.type, seed = subj),
+                        meta = it,
+                        type = it.type
                     )
                 }
             },
@@ -244,7 +325,7 @@ class CalendarManager(
         onHeaderUpdate?.invoke()
 
         // Ensure cache for the month of initial day
-        prefetchMonthCache(java.time.YearMonth.from(calendarState.selectedDate))
+        prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
 
         pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -252,7 +333,7 @@ class CalendarManager(
                 val diff = position - DayPagerAdapter.START_INDEX
                 calendarState.selectedDate = base.plusDays(diff.toLong())
                 // Prefetch month cache for the newly visible day
-                prefetchMonthCache(java.time.YearMonth.from(calendarState.selectedDate))
+                prefetchMonthCache(YearMonth.from(calendarState.selectedDate))
                 // Notify header update
                 onHeaderUpdate?.invoke()
             }
@@ -326,9 +407,8 @@ class CalendarManager(
     private fun positionWeekPager() {
         if (weekPagerInitialised) {
             val base = pagerBaseStartOfWeek ?: calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            val targetStart = calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            val weeksDiff = ChronoUnit.WEEKS.between(base, targetStart).toInt()
-            val target = WeekPagerAdapter.START_INDEX + weeksDiff
+            val diff = ChronoUnit.WEEKS.between(base, calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))).toInt()
+            val target = WeekPagerAdapter.START_INDEX + diff
             if (binding.weekPager.currentItem != target) {
                 binding.weekPager.setCurrentItem(target, false)
             }
@@ -338,8 +418,8 @@ class CalendarManager(
     private fun positionDayPager() {
         if (dayPagerInitialised) {
             val base = pagerBaseDate ?: calendarState.selectedDate
-            val daysDiff = ChronoUnit.DAYS.between(base, calendarState.selectedDate).toInt()
-            val target = DayPagerAdapter.START_INDEX + daysDiff
+            val diff = ChronoUnit.DAYS.between(base, calendarState.selectedDate).toInt()
+            val target = DayPagerAdapter.START_INDEX + diff
             if (binding.dayPager.currentItem != target) {
                 binding.dayPager.setCurrentItem(target, false)
             }
@@ -347,14 +427,15 @@ class CalendarManager(
     }
 
     private fun getOptimizedMonthIndex(ym: YearMonth): Int {
-        return if (cachedMonthYearMonth == ym && cachedMonthIndex != -1) {
-            cachedMonthIndex
-        } else {
-            val index = ym.year * 12 + ym.monthValue
-            cachedMonthIndex = index
-            cachedMonthYearMonth = ym
-            index
+        // Cache last computed month index to avoid repeated calculations
+        if (cachedMonthYearMonth == ym && cachedMonthIndex >= 0) {
+            return cachedMonthIndex
         }
+        val base = pagerBaseYearMonth ?: calendarState.selectedYearMonth
+        val diff = ChronoUnit.MONTHS.between(base, ym).toInt()
+        cachedMonthIndex = MonthPagerAdapter.START_INDEX + diff
+        cachedMonthYearMonth = ym
+        return cachedMonthIndex
     }
 
     /**
