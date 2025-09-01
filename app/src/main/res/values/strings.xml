@@ -59,4 +59,18 @@
     <string name="placeholder_empty">—</string>
     <string name="teacher_ids_format">ID викладачів: %1$s</string>
     <string name="group_ids_format">ID груп: %1$s</string>
+    <string name="label_links">Посилання предмету</string>
+    <string name="add_link">Додати посилання</string>
+    <string name="edit_link">Редагувати</string>
+    <string name="delete_link">Видалити</string>
+    <string name="set_primary">Зробити основним</string>
+    <string name="primary">Основне</string>
+    <string name="video_conference_badge">Відеоконференція</string>
+    <string name="link_title_optional">Назва (необовʼязково)</string>
+    <string name="link_url">Посилання</string>
+    <string name="save">Зберегти</string>
+    <string name="invalid_url">Невірне посилання</string>
+    <string name="delete_link_confirm">Видалити це посилання?</string>
+    <string name="brand_google_meet">Google Meet</string>
+    <string name="brand_zoom">Zoom</string>
 </resources>
