@@ -19,6 +19,11 @@ import com.mindenit.schedule.data.EventRepository
 import kotlinx.coroutines.launch
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.NavController
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.YearMonth
+import com.mindenit.schedule.data.SchedulesStorage
 
 /**
  * Оптимізований HomeFragment з декомпозицією та розумним кешуванням
@@ -173,6 +178,7 @@ class HomeFragment : Fragment() {
 
             override fun onPrepareMenu(menu: Menu) {
                 menu.findItem(R.id.action_calendar_view)?.isVisible = calendarState.hasActiveSchedule
+                menu.findItem(R.id.action_refresh_schedule)?.isVisible = true
             }
 
             override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
@@ -181,10 +187,45 @@ class HomeFragment : Fragment() {
                         showViewModePopup()
                         true
                     }
+                    R.id.action_refresh_schedule -> {
+                        refreshSchedule()
+                        true
+                    }
                     else -> false
                 }
             }
         }, viewLifecycleOwner, Lifecycle.State.RESUMED)
+    }
+
+    private fun refreshSchedule() {
+        val ctx = requireContext()
+        val storage = SchedulesStorage(ctx)
+        val active = storage.getActive()
+        if (active == null) {
+            Toast.makeText(ctx, R.string.no_active_schedule, Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(ctx, R.string.refreshing_schedule, Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Clear all cached events (disk + memory)
+                EventRepository.clearAll(ctx)
+                // Prefetch 24 months (±12 from current month)
+                val base = YearMonth.now()
+                for (offset in -12..12) {
+                    try {
+                        EventRepository.ensureMonthCached(ctx, base.plusMonths(offset.toLong()))
+                    } catch (_: Throwable) { }
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    // Refresh UI
+                    calendarManager.refreshVisible()
+                    calendarNavigator.updateTitle()
+                    Toast.makeText(ctx, R.string.refresh_complete, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     override fun onResume() {

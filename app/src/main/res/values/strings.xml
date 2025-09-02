@@ -103,4 +103,8 @@
     <string name="weekday_fri_short">пт</string>
     <string name="weekday_sat_short">сб</string>
     <string name="weekday_sun_short">нд</string>
+    <string name="action_refresh_schedule">Оновити розклад</string>
+    <string name="refreshing_schedule">Оновлення розкладу…</string>
+    <string name="refresh_complete">Розклад оновлено</string>
+    <string name="no_active_schedule">Немає активного розкладу</string>
 </resources>

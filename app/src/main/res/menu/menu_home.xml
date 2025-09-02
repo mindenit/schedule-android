@@ -7,4 +7,10 @@
         android:title="@string/action_calendar_view"
         app:iconTint="?attr/colorOnSurface"
         app:showAsAction="always" />
+    <item
+        android:id="@+id/action_refresh_schedule"
+        android:icon="@drawable/ic_refresh_schedule_24"
+        android:title="@string/action_refresh_schedule"
+        app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="always" />
 </menu>

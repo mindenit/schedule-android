@@ -551,4 +551,18 @@ class CalendarManager(
         cachedMonthIndex = -1
         cachedMonthYearMonth = null
     }
+
+    fun refreshVisible() {
+        // Rebind visible parts without altering scroll positions
+        if (monthCalendarInitialized) {
+            binding.calendarView.notifyCalendarChanged()
+        }
+        weekPagerAdapter?.let {
+            binding.weekPager.adapter?.notifyItemChanged(binding.weekPager.currentItem)
+        }
+        dayPagerAdapter?.let {
+            binding.dayPager.adapter?.notifyItemChanged(binding.dayPager.currentItem)
+        }
+        onHeaderUpdate?.invoke()
+    }
 }

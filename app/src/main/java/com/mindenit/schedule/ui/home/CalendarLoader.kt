@@ -58,7 +58,11 @@ class CalendarLoader(
             delay(maxLoadingTime)
             if (isCalendarLoading) {
                 Log.d(logTag, "Loading fallback triggered")
-                hideLoading(calendarState) {}
+                // Якщо підготовка затягнулась, ховаємо лоадер та миттєво показуємо потрібний режим
+                hideLoading(calendarState) {
+                    val modeToShow = targetMode ?: calendarState.viewMode
+                    showCalendarInstantly(modeToShow)
+                }
             }
         }
         return true
