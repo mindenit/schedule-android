@@ -113,6 +113,9 @@ class HomeFragment : Fragment() {
         }
         findNavController().addOnDestinationChangedListener(navDestListener!!)
 
+        // FAB: jump to today/current period
+        binding.fabToday.setOnClickListener { calendarManager.goToToday() }
+
         setupBackNavigation()
         applyDefaultViewMode()
         setupEmptyStateAction()
@@ -125,6 +128,7 @@ class HomeFragment : Fragment() {
         } else if (calendarState.hasActiveSchedule) {
             Log.d(logTag, "onViewCreated: quick restore without rerender")
             calendarNavigator.fastRestore()
+            binding.fabToday.isVisible = true
         } else {
             Log.d(logTag, "onViewCreated: showing empty state")
             showEmptyState()
@@ -210,9 +214,9 @@ class HomeFragment : Fragment() {
             try {
                 // Clear all cached events (disk + memory)
                 EventRepository.clearAll(ctx)
-                // Prefetch 24 months (±12 from current month)
+                // Prefetch 24 months around current month ([-11, +12])
                 val base = YearMonth.now()
-                for (offset in -12..12) {
+                for (offset in -11..12) {
                     try {
                         EventRepository.ensureMonthCached(ctx, base.plusMonths(offset.toLong()))
                     } catch (_: Throwable) { }
@@ -271,6 +275,7 @@ class HomeFragment : Fragment() {
 
         // Ховаємо empty state
         binding.emptyState.isGone = true
+        binding.fabToday.isVisible = true
 
         // Рендеримо календар
         calendarNavigator.renderMode { clickedDate ->
@@ -283,6 +288,7 @@ class HomeFragment : Fragment() {
         calendarLoader.hideOtherPagers(CalendarState.ViewMode.MONTH)
         binding.loadingState.isGone = true
         binding.emptyState.isVisible = true
+        binding.fabToday.isVisible = false
     }
 
     private fun showViewModePopup() {

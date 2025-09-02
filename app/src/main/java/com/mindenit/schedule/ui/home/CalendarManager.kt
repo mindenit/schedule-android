@@ -17,6 +17,7 @@ import android.graphics.drawable.GradientDrawable
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import com.mindenit.schedule.R
 import com.kizitonwose.calendar.view.CalendarView
 import com.kizitonwose.calendar.view.ViewContainer
@@ -99,9 +100,13 @@ class CalendarManager(
         val endMonth = calendarState.selectedYearMonth.plusYears(100)
         val firstDayOfWeek = DayOfWeek.MONDAY // Fixed Monday as in UI header
 
+        // Ensure visible before setup to avoid layout glitches
+        binding.weekdayHeader.isVisible = true
+        binding.calendarView.isVisible = true
+
         cv.setup(startMonth, endMonth, firstDayOfWeek)
         cv.scrollToMonth(calendarState.selectedYearMonth)
-        // Use our day layout
+        // Use our day layout (already set in XML too)
         cv.dayViewResource = R.layout.item_calendar_day
 
         // Prefetch initial month and neighbors
@@ -124,6 +129,9 @@ class CalendarManager(
             prefetchMonthCache(month.yearMonth)
             onHeaderUpdate?.invoke()
         }
+
+        // Force initial rebind to ensure cells are drawn on first show
+        cv.post { cv.notifyCalendarChanged() }
 
         monthCalendarInitialized = true
     }
@@ -562,6 +570,31 @@ class CalendarManager(
         }
         dayPagerAdapter?.let {
             binding.dayPager.adapter?.notifyItemChanged(binding.dayPager.currentItem)
+        }
+        onHeaderUpdate?.invoke()
+    }
+
+    /**
+     * Jump to today's date depending on current mode and refresh UI.
+     */
+    fun goToToday(mode: CalendarState.ViewMode = calendarState.viewMode) {
+        when (mode) {
+            CalendarState.ViewMode.MONTH -> {
+                val ym = YearMonth.now()
+                calendarState.selectedYearMonth = ym
+                binding.calendarView.scrollToMonth(ym)
+                binding.calendarView.post { binding.calendarView.notifyCalendarChanged() }
+            }
+            CalendarState.ViewMode.WEEK -> {
+                calendarState.selectedDate = LocalDate.now()
+                positionWeekPager()
+                weekPagerAdapter?.let { binding.weekPager.adapter?.notifyItemChanged(binding.weekPager.currentItem) }
+            }
+            CalendarState.ViewMode.DAY -> {
+                calendarState.selectedDate = LocalDate.now()
+                positionDayPager()
+                dayPagerAdapter?.let { binding.dayPager.adapter?.notifyItemChanged(binding.dayPager.currentItem) }
+            }
         }
         onHeaderUpdate?.invoke()
     }

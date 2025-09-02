@@ -79,8 +79,22 @@ class WeekScheduleView @JvmOverloads constructor(
     }
     private val nowLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
-        strokeWidth = 2f * density
+        strokeWidth = 2f * resources.displayMetrics.density
     }
+    private val nowChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
+        style = Paint.Style.FILL
+    }
+    private val nowChipTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnPrimary)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
+        isFakeBoldText = true
+    }
+    private val nowDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
+        style = Paint.Style.FILL
+    }
+
     private val headerTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
@@ -122,6 +136,25 @@ class WeekScheduleView @JvmOverloads constructor(
 
     // Event click listener
     var onEventClick: ((WeekEvent) -> Unit)? = null
+
+    // Periodic ticker to keep the now indicator updated
+    private val nowTicker = object : Runnable {
+        override fun run() {
+            invalidate()
+            postDelayed(this, 30_000L)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        removeCallbacks(nowTicker)
+        post(nowTicker)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(nowTicker)
+        super.onDetachedFromWindow()
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val desiredHours = (endMinutes - startMinutes) / 60f // 11h
@@ -214,30 +247,15 @@ class WeekScheduleView @JvmOverloads constructor(
             canvas.drawLine(x, gridTop, x, gridBottom, gridPaint)
         }
 
-        // Now line for current day/time (only if within visible window)
-        if (!today.isBefore(startOfWeek) && !today.isAfter(startOfWeek.plusDays(6))) {
-            val now = LocalTime.now()
-            val minutes = now.hour * 60 + now.minute
-            if (minutes in startMinutes..endMinutes) {
-                val y = minuteToY(minutes)
-                val dayIndex = (today.dayOfWeek.value + 6) % 7
-                val x0 = gridLeft + dayIndex * dayWidth
-                val x1 = x0 + dayWidth
-                canvas.drawLine(x0, y, x1, y, nowLinePaint)
-            }
-        }
-
-        // Draw events (group same-time in one slot per day)
+        // Draw events per day
         hitRects.clear()
         for (dayIndex in 0..6) {
-            // Collect events for this day and clamp to visible window
             val dayEvents = events.filter { ((it.start.toLocalDate().dayOfWeek.value + 6) % 7) == dayIndex }
             if (dayEvents.isEmpty()) continue
 
             val columnLeft = gridLeft + dayIndex * dayWidth
             val columnRight = columnLeft + dayWidth
 
-            // key: Pair(topMin, bottomMin)
             val groups = linkedMapOf<Pair<Int, Int>, MutableList<WeekEvent>>()
             for (e in dayEvents) {
                 val s = minutesSinceStartOfDay(e.start)
@@ -348,6 +366,44 @@ class WeekScheduleView @JvmOverloads constructor(
                 }
             }
         }
+
+        // Draw now overlay LAST to be on top of everything
+        drawNowOverlay(canvas, today, gridLeft, dayWidth, ::minuteToY)
+    }
+
+    private fun drawNowOverlay(canvas: Canvas, today: LocalDate, gridLeft: Float, dayWidth: Float, minuteToY: (Int) -> Float) {
+        if (today.isBefore(startOfWeek) || today.isAfter(startOfWeek.plusDays(6))) return
+        val now = LocalTime.now()
+        val minutes = now.hour * 60 + now.minute
+        if (minutes !in startMinutes..endMinutes) return
+        val y = minuteToY(minutes)
+        val dayIndex = (today.dayOfWeek.value + 6) % 7
+        val x0 = gridLeft + dayIndex * dayWidth
+        val x1 = x0 + dayWidth
+
+        // Line across current day column
+        canvas.drawLine(x0, y, x1, y, nowLinePaint)
+
+        // Dot at leading edge
+        val dotR = 3.5f * resources.displayMetrics.density
+        val dotCx = x0 + 4f * resources.displayMetrics.density
+        canvas.drawCircle(dotCx, y, dotR, nowDotPaint)
+
+        // Time chip near left edge
+        val timeText = String.format(Locale.getDefault(), "%02d:%02d", now.hour, now.minute)
+        val padH = 8f * resources.displayMetrics.density
+        val padV = 4f * resources.displayMetrics.density
+        val textW = nowChipTextPaint.measureText(timeText)
+        val textH = nowChipTextPaint.textSize
+        val chipLeft = x0 + 8f * resources.displayMetrics.density
+        val chipTop = y - textH / 2f - padV
+        val chipRight = (chipLeft + textW + 2 * padH).coerceAtMost(x1 - 4f * resources.displayMetrics.density)
+        val chipBottom = y + textH / 2f + padV
+        val chipRect = RectF(chipLeft, chipTop, chipRight, chipBottom)
+        val radius = 12f * resources.displayMetrics.density
+        canvas.drawRoundRect(chipRect, radius, radius, nowChipPaint)
+        val baseline = y + textH / 2f - 2f * resources.displayMetrics.density
+        canvas.drawText(timeText, chipLeft + padH, baseline, nowChipTextPaint)
     }
 
     // Draws text wrapped by characters within [left,right] and up to maxBottom.

@@ -6,7 +6,7 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface ApiService {
-    @GET("health")
+    @GET("api/health")
     suspend fun health(): Response<Unit>
 
     @GET("api/groups/{id}/schedule")
