@@ -1,15 +1,18 @@
 package com.mindenit.schedule.ui.home
 
+import android.app.Dialog
 import android.os.Bundle
 import android.view.*
-import android.widget.CheckBox
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.os.bundleOf
-import androidx.fragment.app.DialogFragment
+import androidx.core.view.isVisible
 import androidx.fragment.app.setFragmentResult
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.mindenit.schedule.R
@@ -24,22 +27,36 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class FiltersDialogFragment : DialogFragment() {
+class FiltersDialogFragment : BottomSheetDialogFragment() {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
-    private lateinit var sectionTypes: LinearLayout
-    private lateinit var sectionTeachers: LinearLayout
-    private lateinit var sectionAuditoriums: LinearLayout
-    private lateinit var sectionSubjects: LinearLayout
+    // UI elements
+    private lateinit var chipGroupLessonTypes: ChipGroup
+    private lateinit var recyclerTeachers: RecyclerView
+    private lateinit var recyclerAuditoriums: RecyclerView
+    private lateinit var recyclerSubjects: RecyclerView
 
-    private lateinit var lessonTypes: ChipGroup
-    private lateinit var listTeachers: RecyclerView
-    private lateinit var listAuditoriums: RecyclerView
-    private lateinit var listSubjects: RecyclerView
+    // Count chips
+    private lateinit var chipTypesCount: Chip
+    private lateinit var chipTeachersCount: Chip
+    private lateinit var chipAuditoriumsCount: Chip
+    private lateinit var chipSubjectsCount: Chip
 
     private var teacherAdapter: CheckAdapter? = null
     private var auditoriumAdapter: CheckAdapter? = null
     private var subjectAdapter: CheckAdapter? = null
+
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        val dialog = super.onCreateDialog(savedInstanceState) as BottomSheetDialog
+        dialog.setOnShowListener {
+            val behavior = dialog.behavior
+            behavior.isFitToContents = false
+            behavior.skipCollapsed = true
+            behavior.state = BottomSheetBehavior.STATE_EXPANDED
+            behavior.peekHeight = 600
+        }
+        return dialog
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         return inflater.inflate(R.layout.bottomsheet_filters, container, false)
@@ -47,33 +64,34 @@ class FiltersDialogFragment : DialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        sectionTypes = view.findViewById(R.id.section_types)
-        sectionTeachers = view.findViewById(R.id.section_teachers)
-        sectionAuditoriums = view.findViewById(R.id.section_auditoriums)
-        sectionSubjects = view.findViewById(R.id.section_subjects)
 
-        // Build dynamic ChipGroup and RecyclerViews inside sections
-        lessonTypes = ChipGroup(requireContext()).apply { isSingleSelection = false }
-        sectionTypes.addView(lessonTypes)
+        // Initialize UI elements
+        chipGroupLessonTypes = view.findViewById(R.id.chip_group_lesson_types)
+        recyclerTeachers = view.findViewById(R.id.recycler_teachers)
+        recyclerAuditoriums = view.findViewById(R.id.recycler_auditoriums)
+        recyclerSubjects = view.findViewById(R.id.recycler_subjects)
 
-        listTeachers = RecyclerView(requireContext()).apply {
+        // Count chips
+        chipTypesCount = view.findViewById(R.id.chip_types_count)
+        chipTeachersCount = view.findViewById(R.id.chip_teachers_count)
+        chipAuditoriumsCount = view.findViewById(R.id.chip_auditoriums_count)
+        chipSubjectsCount = view.findViewById(R.id.chip_subjects_count)
+
+        // Setup RecyclerViews
+        recyclerTeachers.apply {
             layoutManager = LinearLayoutManager(requireContext())
             isNestedScrollingEnabled = false
         }
-        sectionTeachers.addView(listTeachers)
-
-        listAuditoriums = RecyclerView(requireContext()).apply {
+        recyclerAuditoriums.apply {
             layoutManager = LinearLayoutManager(requireContext())
             isNestedScrollingEnabled = false
         }
-        sectionAuditoriums.addView(listAuditoriums)
-
-        listSubjects = RecyclerView(requireContext()).apply {
+        recyclerSubjects.apply {
             layoutManager = LinearLayoutManager(requireContext())
             isNestedScrollingEnabled = false
         }
-        sectionSubjects.addView(listSubjects)
 
+        // Setup button listeners
         view.findViewById<View>(R.id.btn_apply_filters).setOnClickListener { saveSelectionsAndClose() }
         view.findViewById<View>(R.id.btn_reset_filters).setOnClickListener { applyAndClose(FiltersStorage.Filters()) }
 
@@ -86,12 +104,49 @@ class FiltersDialogFragment : DialogFragment() {
     }
 
     private fun setContentEnabled(enabled: Boolean) {
-        lessonTypes.isEnabled = enabled
-        listTeachers.isEnabled = enabled
-        listAuditoriums.isEnabled = enabled
-        listSubjects.isEnabled = enabled
+        chipGroupLessonTypes.isEnabled = enabled
+        recyclerTeachers.isEnabled = enabled
+        recyclerAuditoriums.isEnabled = enabled
+        recyclerSubjects.isEnabled = enabled
         view?.findViewById<View>(R.id.btn_apply_filters)?.isEnabled = enabled
         view?.findViewById<View>(R.id.btn_reset_filters)?.isEnabled = enabled
+    }
+
+    private fun updateCountChips() {
+        // Update lesson types count
+        val selectedTypesCount = (0 until chipGroupLessonTypes.childCount).count {
+            val chip = chipGroupLessonTypes.getChildAt(it) as? Chip
+            chip?.isChecked == true
+        }
+        updateCountChip(chipTypesCount, selectedTypesCount)
+
+        // Update other counts
+        updateCountChip(chipTeachersCount, teacherAdapter?.selectedIds()?.size ?: 0)
+        updateCountChip(chipAuditoriumsCount, auditoriumAdapter?.selectedIds()?.size ?: 0)
+        updateCountChip(chipSubjectsCount, subjectAdapter?.selectedIds()?.size ?: 0)
+    }
+
+    private fun updateCountChip(chip: Chip, count: Int) {
+        if (count > 0) {
+            chip.text = count.toString()
+            chip.isVisible = true
+        } else {
+            chip.isVisible = false
+        }
+    }
+
+    private fun clearAllFilters() {
+        // Clear lesson types
+        for (i in 0 until chipGroupLessonTypes.childCount) {
+            (chipGroupLessonTypes.getChildAt(i) as? Chip)?.isChecked = false
+        }
+
+        // Clear adapters
+        teacherAdapter?.clearSelection()
+        auditoriumAdapter?.clearSelection()
+        subjectAdapter?.clearSelection()
+
+        updateCountChips()
     }
 
     private fun loadData() {
@@ -105,14 +160,15 @@ class FiltersDialogFragment : DialogFragment() {
 
         val existing = FiltersStorage(requireContext()).get(active.first, active.second)
         val types = listOf("Лк", "Пз", "Лб", "Конс", "Зал", "Екз", "КП/КР")
-        lessonTypes.removeAllViews()
+        chipGroupLessonTypes.removeAllViews()
         types.forEach { t ->
             val chip = Chip(requireContext()).apply {
                 text = t
                 isCheckable = true
                 isChecked = existing.lessonTypes.contains(t)
+                setOnCheckedChangeListener { _, _ -> updateCountChips() }
             }
-            lessonTypes.addView(chip)
+            chipGroupLessonTypes.addView(chip)
         }
 
         scope.launch {
@@ -142,13 +198,16 @@ class FiltersDialogFragment : DialogFragment() {
                 subjectsCached.forEach { (sid, titles) -> subjectsMap.putIfAbsent(sid, titles.second.ifBlank { titles.first }) }
                 val subjectsList = subjectsMap.entries.sortedBy { it.value.lowercase() }.map { it.key to it.value }
 
-                teacherAdapter = CheckAdapter(teachersList, existing.teachers)
-                auditoriumAdapter = CheckAdapter(auditoriumsList, existing.auditoriums)
-                subjectAdapter = CheckAdapter(subjectsList, existing.subjects)
+                teacherAdapter = CheckAdapter(teachersList, existing.teachers) { updateCountChips() }
+                auditoriumAdapter = CheckAdapter(auditoriumsList, existing.auditoriums) { updateCountChips() }
+                subjectAdapter = CheckAdapter(subjectsList, existing.subjects) { updateCountChips() }
 
-                listTeachers.adapter = teacherAdapter
-                listAuditoriums.adapter = auditoriumAdapter
-                listSubjects.adapter = subjectAdapter
+                recyclerTeachers.adapter = teacherAdapter
+                recyclerAuditoriums.adapter = auditoriumAdapter
+                recyclerSubjects.adapter = subjectAdapter
+
+                // Initial count update
+                updateCountChips()
             } finally {
                 setContentEnabled(true)
             }
@@ -157,8 +216,8 @@ class FiltersDialogFragment : DialogFragment() {
 
     private fun saveSelectionsAndClose() {
         val selectedTypes = mutableSetOf<String>()
-        for (i in 0 until lessonTypes.childCount) {
-            val c = lessonTypes.getChildAt(i)
+        for (i in 0 until chipGroupLessonTypes.childCount) {
+            val c = chipGroupLessonTypes.getChildAt(i)
             if (c is Chip && c.isChecked) selectedTypes.add(c.text.toString())
         }
         val filters = FiltersStorage.Filters(
@@ -179,32 +238,48 @@ class FiltersDialogFragment : DialogFragment() {
 
     class CheckAdapter(
         private val items: List<Pair<Long, String>>, // id to title
-        preselected: Set<Long>
+        preselected: Set<Long>,
+        private val onSelectionChanged: (() -> Unit)? = null
     ) : RecyclerView.Adapter<CheckAdapter.VH>() {
         private val selected = preselected.toMutableSet()
+
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val v = LayoutInflater.from(parent.context).inflate(R.layout.item_filter_check, parent, false)
             return VH(v)
         }
+
         override fun getItemCount(): Int = items.size
+
         override fun onBindViewHolder(holder: VH, position: Int) {
             val (id, title) = items[position]
             holder.title.text = title
             holder.check.setOnCheckedChangeListener(null)
             holder.check.isChecked = selected.contains(id)
+
             holder.itemView.setOnClickListener {
                 val now = !holder.check.isChecked
                 holder.check.isChecked = now
+                if (now) selected.add(id) else selected.remove(id)
+                onSelectionChanged?.invoke()
             }
+
             holder.check.setOnCheckedChangeListener { _, isChecked ->
                 if (isChecked) selected.add(id) else selected.remove(id)
+                onSelectionChanged?.invoke()
             }
         }
+
         fun selectedIds(): List<Long> = selected.toList()
+
+        fun clearSelection() {
+            selected.clear()
+            notifyDataSetChanged()
+            onSelectionChanged?.invoke()
+        }
+
         class VH(v: View) : RecyclerView.ViewHolder(v) {
-            val check: CheckBox = v.findViewById(R.id.checkbox)
+            val check: MaterialCheckBox = v.findViewById(R.id.checkbox)
             val title: TextView = v.findViewById(R.id.title)
         }
     }
 }
-

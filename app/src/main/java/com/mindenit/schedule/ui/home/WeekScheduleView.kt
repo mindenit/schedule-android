@@ -95,7 +95,7 @@ class WeekScheduleView @JvmOverloads constructor(
     }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurfaceVariant)
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10.8f, resources.displayMetrics)
     }
     // Smaller time text for event cards (half size)
     private val eventTimeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -104,7 +104,7 @@ class WeekScheduleView @JvmOverloads constructor(
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurface)
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13f, resources.displayMetrics)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 11f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -314,8 +314,9 @@ class WeekScheduleView @JvmOverloads constructor(
                 val totalGap = colGap * (cols - 1)
                 val perW = ((slotRight - slotLeft - totalGap) / cols).coerceAtLeast(8f * density)
 
-                // sort for stable order (e.g., by title)
-                val sorted = list.sortedBy { it.title }
+                // sort for stable order (use subject label, then domain id if available)
+                fun subjectOf(ev: WeekEvent): String = ev.title.substringBefore(" • ").lowercase(Locale.getDefault())
+                val sorted = list.sortedWith(compareBy<WeekEvent>({ subjectOf(it) }, { (it.meta as? com.mindenit.schedule.data.Event)?.id ?: 0L }))
                 for ((idx, event) in sorted.withIndex()) {
                     val left = slotLeft + idx * (perW + colGap)
                     val right = (left + perW).coerceAtMost(slotRight)

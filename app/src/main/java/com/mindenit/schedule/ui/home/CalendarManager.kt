@@ -142,18 +142,27 @@ class CalendarManager(
         val events = EventRepository.getEventsForDateFast(ctx, date)
         if (events.isEmpty()) return emptyList()
         val grouped = events.groupBy { ev -> ev.subject.brief.ifBlank { ev.subject.title } }
-        val sorted = grouped.entries.sortedBy { it.key }.map { (label, list) ->
-            val dominantType = list
-                .groupingBy { it.type.lowercase() }
-                .eachCount()
-                .maxByOrNull { it.value }
-                ?.key ?: ""
-            SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
-        }
+        // Sort subjects by earliest declared pair/time to reflect real-day order
+        val sorted = grouped.entries
+            .sortedWith(
+                compareBy(
+                    { e -> e.value.minOfOrNull { it.numberPair ?: Int.MAX_VALUE } ?: Int.MAX_VALUE },
+                    { e -> e.value.minOf { it.start } },
+                    { e -> e.key }
+                )
+            )
+            .map { (label, list) ->
+                val dominantType = list
+                    .groupingBy { it.type.lowercase() }
+                    .eachCount()
+                    .maxByOrNull { it.value }
+                    ?.key ?: ""
+                SubjectBadge(label = label, color = darkColorForType(dominantType, seed = label))
+            }
         // Cap badges to at most 3 and show overflow counter
         val maxBadges = 3
         return if (sorted.size <= maxBadges) sorted else sorted.take(maxBadges - 1) + listOf(
-            SubjectBadge(label = "+${sorted.size - (maxBadges - 1)}", color = Color.parseColor("#9E9E9E"))
+            SubjectBadge(label = "+${sorted.size - (maxBadges - 1)}", color = android.graphics.Color.parseColor("#9E9E9E"))
         )
     }
 
