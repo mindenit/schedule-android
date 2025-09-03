@@ -180,7 +180,7 @@ class DayScheduleView @JvmOverloads constructor(
         // Only draw if events exist
         if (events.isEmpty()) return
 
-        val corner = 10f * density
+        // Removed unused 'corner' variable
         val horizPad = 8f * density
         val vertPad = 6f * density
         val accentW = 4f * density
@@ -213,8 +213,9 @@ class DayScheduleView @JvmOverloads constructor(
             val totalGap = if (cols > 1) colGap * (cols - 1) else 0f
             val perW = if (cols > 1) ((slotRight - slotLeft - totalGap) / cols).coerceAtLeast(8f * density) else (slotRight - slotLeft)
 
-            // Stable order (by title then start)
-            val sorted = list.sortedWith(compareBy({ it.title }, { it.start }))
+            // Stable order within the slot: by subject label, then domain id if available
+            fun subjectOf(ev: DayEvent): String = ev.title.substringBefore(" • ").lowercase(Locale.getDefault())
+            val sorted = list.sortedWith(compareBy<DayEvent>({ subjectOf(it) }, { (it.meta as? com.mindenit.schedule.data.Event)?.id ?: 0L }))
 
             for ((idx, event) in sorted.withIndex()) {
                 val left = if (cols > 1) slotLeft + idx * (perW + colGap) else slotLeft

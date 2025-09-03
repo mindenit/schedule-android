@@ -24,7 +24,7 @@ import java.io.OutputStreamWriter
 
 class ManageHiddenSubjectsFragment : Fragment() {
     private lateinit var list: RecyclerView
-    private lateinit var empty: TextView
+    private lateinit var empty: View
     private lateinit var importBtn: View
     private lateinit var exportBtn: View
 
@@ -42,7 +42,7 @@ class ManageHiddenSubjectsFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val root = inflater.inflate(R.layout.fragment_manage_hidden_subjects, container, false)
         list = root.findViewById<RecyclerView>(R.id.hidden_list)
-        empty = root.findViewById<TextView>(R.id.hidden_empty)
+        empty = root.findViewById<View>(R.id.hidden_empty)
         importBtn = root.findViewById<View>(R.id.btn_import_hidden)
         exportBtn = root.findViewById<View>(R.id.btn_export_hidden)
 
@@ -67,7 +67,9 @@ class ManageHiddenSubjectsFragment : Fragment() {
         items = storage.getAll().sorted().toMutableList()
         subjectNames = EventRepository.getSubjectNamesFromCache(ctx)
         (list.adapter as HiddenAdapter).notifyDataSetChanged()
-        empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        val isEmpty = items.isEmpty()
+        empty.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        list.visibility = if (isEmpty) View.GONE else View.VISIBLE
     }
 
     private inner class HiddenAdapter : RecyclerView.Adapter<VH>() {
