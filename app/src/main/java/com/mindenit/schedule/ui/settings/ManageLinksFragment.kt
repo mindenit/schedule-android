@@ -22,7 +22,7 @@ import com.google.gson.Gson
 
 class ManageLinksFragment : Fragment() {
     private lateinit var list: RecyclerView
-    private lateinit var empty: TextView
+    private lateinit var empty: View
     private lateinit var importBtn: View
     private lateinit var exportBtn: View
 
@@ -40,7 +40,7 @@ class ManageLinksFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val root = inflater.inflate(R.layout.fragment_manage_links, container, false)
         list = root.findViewById<RecyclerView>(R.id.links_list)
-        empty = root.findViewById<TextView>(R.id.links_empty)
+        empty = root.findViewById<View>(R.id.links_empty)
         importBtn = root.findViewById<View>(R.id.btn_import)
         exportBtn = root.findViewById<View>(R.id.btn_export)
 
@@ -66,7 +66,9 @@ class ManageLinksFragment : Fragment() {
         subjectNames = EventRepository.getSubjectNamesFromCache(ctx)
         items = map.values.flatten().sortedWith(compareBy({ it.subjectId }, { it.title.ifBlank { it.url } })).toMutableList()
         (list.adapter as LinksAdapter).notifyDataSetChanged()
-        empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        val isEmpty = items.isEmpty()
+        empty.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        list.visibility = if (isEmpty) View.GONE else View.VISIBLE
     }
 
     private inner class LinksAdapter : RecyclerView.Adapter<LinkVH>() {

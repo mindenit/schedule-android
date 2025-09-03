@@ -4,17 +4,16 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Outer circle -->
+    <!-- Outer circle uses theme-aware base color -->
     <path
-        android:fillColor="#FF000000"
+        android:fillColor="@color/color_sad_face_base"
         android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z" />
-    <!-- Eyes -->
+    <!-- Eyes use theme-aware foreground color -->
     <path
-        android:fillColor="#FFFFFFFF"
+        android:fillColor="@color/color_sad_face_fg"
         android:pathData="M8.5,9C9.33,9 10,9.67 10,10.5S9.33,12 8.5,12 7,11.33 7,10.5 7.67,9 8.5,9zM15.5,9C16.33,9 17,9.67 17,10.5S16.33,12 15.5,12 14,11.33 14,10.5 14.67,9 15.5,9z" />
-    <!-- Sad mouth (inverted arc) -->
+    <!-- Sad mouth (inverted arc) uses theme-aware foreground color -->
     <path
-        android:fillColor="#FFFFFFFF"
+        android:fillColor="@color/color_sad_face_fg"
         android:pathData="M12,13c-2.33,0 -4.31,1.46 -5.11,3.5h10.22C16.31,14.46 14.33,13 12,13z" />
 </vector>
-

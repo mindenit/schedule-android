@@ -242,6 +242,14 @@ object EventRepository {
         memoryCache[mKey] = MonthCache(ym, domain, byDate)
     }
 
+    // Stable comparator for events across all views
+    private val eventComparator = compareBy<Event>(
+        { it.numberPair }, // primary: declared pair number
+        { it.start },
+        { it.subject.brief.ifBlank { it.subject.title } },
+        { it.id }
+    )
+
     private fun buildIndexByDate(events: List<Event>, ym: YearMonth): Map<LocalDate, List<Event>> {
         if (events.isEmpty()) return emptyMap()
         val first = ym.atDay(1)
@@ -260,8 +268,8 @@ object EventRepository {
                 cur = cur.plusDays(1)
             }
         }
-        // Sort each day's events by start time for stable UI
-        return map.mapValues { (_, list) -> list.sortedBy { it.start } }
+        // Sort each day's events with the stable comparator for consistent UI ordering
+        return map.mapValues { (_, list) -> list.sortedWith(eventComparator) }
     }
 
     suspend fun prewarmMonthIndex(context: Context, ym: YearMonth) {
@@ -314,7 +322,7 @@ object EventRepository {
         if (all.isEmpty()) return emptyList()
         val filtered = all.asSequence()
             .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
-            .sortedBy { it.start }
+            .sortedWith(eventComparator)
             .toList()
         return applyLocalFilters(context, filtered)
     }
@@ -331,7 +339,7 @@ object EventRepository {
             val events = loadCachedDtos(context, ym)
                 .map { it.toDomain() }
                 .filter { !it.start.toLocalDate().isAfter(date) && !it.end.toLocalDate().isBefore(date) }
-                .sortedBy { it.start }
+                .sortedWith(eventComparator)
             applyLocalFilters(context, events)
         }
     }
@@ -352,7 +360,7 @@ object EventRepository {
             val events = all
                 .asSequence()
                 .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
-                .sortedBy { it.start }
+                .sortedWith(eventComparator)
                 .toList()
             Log.d(TAG, "getEventsForWeek: startOfWeek=$startOfWeek, found ${'$'}{events.size} events (before local filters)")
             applyLocalFilters(context, events)
@@ -366,7 +374,7 @@ object EventRepository {
             val events = dtos
                 .map { it.toDomain() }
                 .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
-                .sortedBy { it.start }
+                .sortedWith(eventComparator)
             return applyLocalFilters(context, events)
         }
     }
@@ -380,6 +388,28 @@ object EventRepository {
     fun clearAll(context: Context) {
         prefs(context).edit { clear() }
         invalidateMemory()
+    }
+
+    /**
+     * Clear cache when active schedule changes to force fresh data load
+     */
+    fun clearCacheForScheduleChange(context: Context) {
+        Log.d(TAG, "clearCacheForScheduleChange: clearing all caches due to schedule change")
+        invalidateMemory()
+        // Clear SharedPreferences cache for the current active schedule
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive()
+        if (active != null) {
+            val keyPrefix = KEY_DATA + cacheKey(active.first, active.second)
+            val dayPrefix = KEY_DAY + cacheKey(active.first, active.second)
+            prefs(context).edit {
+                // Remove all cached data for this schedule
+                val all = prefs(context).all
+                all.keys.filter { it.startsWith(keyPrefix) || it.startsWith(dayPrefix) }.forEach { key ->
+                    remove(key)
+                }
+            }
+        }
     }
 
     fun clearStampForMonth(context: Context, ym: YearMonth) {

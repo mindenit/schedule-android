@@ -81,13 +81,21 @@ class ListPageFragment : Fragment() {
 
     private fun onQueryChanged(q: String?) {
         val query = q?.trim().orEmpty()
-        val showAll = query.isEmpty() || query.length < 4
-        val list = if (showAll) allItems else allItems.filter { it.matches(query.lowercase()) }
+        // Поиск работает с первого символа, не чувствителен к регистру
+        val list = if (query.isEmpty()) {
+            allItems
+        } else {
+            allItems.filter { it.matches(query.lowercase()) }
+        }
         adapter.submitList(list)
+        showEmptyStateIfNeeded(list, query)
     }
 
-    private fun filter(q: String?) { // keep for any legacy calls
-        onQueryChanged(q)
+    private fun showEmptyStateIfNeeded(list: List<Item>, query: String) {
+        val emptyState = view?.findViewById<View>(R.id.empty_state)
+        val shouldShowEmpty = list.isEmpty() && query.isNotEmpty() && allItems.isNotEmpty()
+        emptyState?.visibility = if (shouldShowEmpty) View.VISIBLE else View.GONE
+        listView?.visibility = if (shouldShowEmpty) View.GONE else View.VISIBLE
     }
 
     private fun load() {

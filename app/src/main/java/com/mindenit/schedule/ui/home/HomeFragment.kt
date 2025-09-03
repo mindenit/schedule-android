@@ -102,6 +102,19 @@ class HomeFragment : Fragment() {
             calendarManager.refreshVisible()
             updateFabVisibility()
         }
+
+        // Listen for active schedule changes to refresh calendar
+        requireActivity().supportFragmentManager.setFragmentResultListener("active_schedule_changed", viewLifecycleOwner) { _, _ ->
+            Log.d(logTag, "Active schedule changed, refreshing calendar")
+            // Clear all caches when active schedule changes
+            EventRepository.clearCacheForScheduleChange(requireContext())
+            // Force re-render when active schedule changes
+            calendarState.clearCache()
+            renderCurrentMode()
+            updateFabVisibility()
+            (activity as? AppCompatActivity)?.invalidateOptionsMenu()
+        }
+
         // Listen for filters changes to refresh calendar (childFragmentManager, where dialog is shown)
         childFragmentManager.setFragmentResultListener("filters_changed", viewLifecycleOwner) { _, _ ->
             calendarManager.refreshVisible()

@@ -25,12 +25,15 @@
             <ImageView
                 android:id="@+id/settings_illustration"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="120dp"
                 android:layout_marginBottom="16dp"
                 android:adjustViewBounds="true"
                 android:scaleType="centerInside"
                 android:contentDescription="@string/settings_image_desc"
                 android:src="@drawable/power_colored_dark"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
                 tools:ignore="ContentDescription" />
 
             <!-- API health block -->

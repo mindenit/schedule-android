@@ -22,8 +22,14 @@ class SchedulesStorage(context: Context) {
     fun add(entry: ScheduleEntry) {
         val list = getAll().toMutableList()
         val idx = list.indexOfFirst { it.type == entry.type && it.id == entry.id }
+        val isNewEntry = idx < 0
         if (idx >= 0) list[idx] = entry else list.add(entry)
         save(list)
+
+        // Якщо це перший розклад або немає активного розкладу, встановлюємо його як активний
+        if (isNewEntry && (list.size == 1 || getActive() == null)) {
+            setActive(entry.type, entry.id)
+        }
     }
 
     fun remove(entry: ScheduleEntry) {

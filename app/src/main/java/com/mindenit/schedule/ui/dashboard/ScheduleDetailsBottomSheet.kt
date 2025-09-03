@@ -63,6 +63,8 @@ class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
         view.findViewById<View>(R.id.btn_set_active)?.setOnClickListener {
             storage.setActive(type, id)
             setFragmentResult(REQUEST_REFRESH, Bundle())
+            // Notify calendar about schedule change
+            requireActivity().supportFragmentManager.setFragmentResult("active_schedule_changed", Bundle())
             dismissAllowingStateLoss()
         }
 
@@ -73,8 +75,13 @@ class ScheduleDetailsBottomSheet : BottomSheetDialogFragment() {
                 .setMessage(getString(R.string.delete_link_confirm))
                 .setPositiveButton(R.string.delete) { d, _ ->
                     val entry = ScheduleEntry(type = type, id = id, name = name)
+                    val wasActive = storage.getActive()?.let { it.first == type && it.second == id } ?: false
                     storage.remove(entry)
                     setFragmentResult(REQUEST_REFRESH, Bundle())
+                    // If we deleted the active schedule, notify calendar
+                    if (wasActive) {
+                        requireActivity().supportFragmentManager.setFragmentResult("active_schedule_changed", Bundle())
+                    }
                     d.dismiss()
                     dismissAllowingStateLoss()
                 }

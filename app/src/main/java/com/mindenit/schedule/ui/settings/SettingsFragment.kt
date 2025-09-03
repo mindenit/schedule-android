@@ -80,6 +80,14 @@ class SettingsFragment : Fragment() {
             startActivity(intent)
         }
 
+        // Settings illustration click - navigate to mindenit.org
+        root.findViewById<View>(R.id.settings_illustration)?.setOnClickListener {
+            val url = "https://mindenit.org"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+        }
+
         // Initialize summaries
         updateThemeSummary(root)
         updateDefaultViewSummary(root)
