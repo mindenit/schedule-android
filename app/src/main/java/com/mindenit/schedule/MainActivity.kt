@@ -15,10 +15,29 @@ import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
 import com.google.android.material.color.DynamicColors
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import com.mindenit.schedule.ui.notifications.NotificationsScheduler
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import com.mindenit.schedule.data.EventRepository
+import java.time.YearMonth
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+
+    private val requestNotifPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // Offload scheduling to background thread to avoid blocking UI
+        lifecycleScope.launch(Dispatchers.Default) {
+            NotificationsScheduler.scheduleForUpcoming(this@MainActivity)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Apply saved theme before view inflation
@@ -66,6 +85,38 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        // Notifications: request permission on 13+ and schedule workers after app start
+        handleNotificationsSetup()
+
+        // On each app launch: clear old cached schedules and prefetch current month
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                EventRepository.clearAll(this@MainActivity)
+                EventRepository.ensureMonthCached(this@MainActivity, YearMonth.now())
+            } catch (_: Throwable) { }
+        }
+    }
+
+    private fun handleNotificationsSetup() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                requestNotifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                // Offload scheduling to background thread
+                lifecycleScope.launch(Dispatchers.Default) {
+                    NotificationsScheduler.scheduleForUpcoming(this@MainActivity)
+                }
+            }
+        } else {
+            lifecycleScope.launch(Dispatchers.Default) {
+                NotificationsScheduler.scheduleForUpcoming(this@MainActivity)
+            }
+        }
     }
 
     private fun applySavedTheme() {

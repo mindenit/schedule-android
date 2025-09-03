@@ -17,6 +17,7 @@ object ApiClient {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
         }
         OkHttpClient.Builder()
+            .addInterceptor(ApiLoggingInterceptor())
             .addInterceptor(logging)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -32,4 +33,3 @@ object ApiClient {
             .create(ApiService::class.java)
     }
 }
-

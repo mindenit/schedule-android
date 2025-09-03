@@ -11,8 +11,8 @@ android {
         applicationId = "com.mindenit.schedule"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "0.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"https://sh.mindenit.org/\"")
@@ -60,6 +60,7 @@ dependencies {
     implementation(libs.androidx.viewpager2)
     implementation(libs.gson)
     implementation(libs.calendarview)
+    implementation(libs.androidx.work.runtime.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

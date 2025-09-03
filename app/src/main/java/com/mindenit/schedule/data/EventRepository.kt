@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.mindenit.schedule.network.Net
 
 object EventRepository {
     private const val PREFS = "events_cache"
@@ -25,7 +26,7 @@ object EventRepository {
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private fun cacheKey(type: ScheduleType, id: Long): String = "${type}_${id}"
+    private fun cacheKey(type: ScheduleType, id: Long): String = "${'$'}{type}_${'$'}{id}"
     private fun monthKey(type: ScheduleType, id: Long, ym: YearMonth): String = cacheKey(type, id) + "_" + ym.toString()
 
     // In-memory month cache to avoid repeated JSON parsing and filtering
@@ -51,6 +52,7 @@ object EventRepository {
 
         if (active == null) {
             Log.w(TAG, "No active schedule found")
+            LogStorage.i(context, "Update", "$ym: пропущено — немає активного розкладу")
             return
         }
 
@@ -68,10 +70,17 @@ object EventRepository {
             return
         }
 
+        if (!Net.hasInternet(context)) {
+            Log.d(TAG, "Skip fetch: no internet")
+            LogStorage.i(context, "Update", "${ym}: пропущено — немає інтернету")
+            return
+        }
+
         val start = ym.atDay(1).atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
         val end = ym.atEndOfMonth().plusDays(1).atStartOfDay(ZoneId.systemDefault()).minusNanos(1).toEpochSecond()
 
-        Log.d(TAG, "Fetching data from API: type=${active.first}, id=${active.second}, start=$start, end=$end")
+        Log.d(TAG, "Fetching data from API: type=${'$'}{active.first}, id=${'$'}{active.second}, start=$start, end=$end")
+        LogStorage.i(context, "Update", "${ym}: початок оновлення (type=${active.first}, id=${active.second})")
 
         try {
             val dto: List<EventDto> = withContext(Dispatchers.IO) {
@@ -82,27 +91,100 @@ object EventRepository {
                 }
             }
 
-            Log.d(TAG, "API response: ${dto.size} events received")
+            Log.d(TAG, "API response: ${'$'}{dto.size} events received")
 
-            val json = gson.toJson(dto)
-            prefs(context).edit {
-                putString(KEY_DATA + mKey, json)
-                putString(KEY_DAY + mKey, today.toString())
+            val oldDtos = withContext(Dispatchers.IO) { loadCachedDtos(context, ym) }
+            val diff = computeDiff(oldDtos, dto)
+
+            if (diff.hasChanges) {
+                LogStorage.i(context, "Update", "${ym}: знайдено зміни: ${diff.summary}")
+                // Log details (limit to avoid spam)
+                val limit = 50
+                diff.details.take(limit).forEach { d ->
+                    LogStorage.i(context, "Update", "${ym}: ${d}")
+                }
+                if (diff.details.size > limit) {
+                    LogStorage.i(context, "Update", "${ym}: …та ще ${diff.details.size - limit} змін")
+                }
+                val json = gson.toJson(dto)
+                prefs(context).edit {
+                    putString(KEY_DATA + mKey, json)
+                    putString(KEY_DAY + mKey, today.toString())
+                }
+                // Rebuild memory cache for this month immediately
+                try {
+                    storeMonthInMemory(mKey, ym, dto.map { it.toDomain() })
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Failed to prebuild memory cache for month=$ym", e)
+                }
+                Log.d(TAG, "Data cached successfully with changes")
+            } else {
+                LogStorage.i(context, "Update", "${ym}: змін немає (${dto.size} подій), кеш лишився без змін")
+                // Still stamp the day to avoid repetitive fetches the same day
+                prefs(context).edit { putString(KEY_DAY + mKey, today.toString()) }
+                // Keep memory cache as is; optionally warm it if empty
+                prewarmMonthIndex(context, ym)
             }
-
-            // Build and populate memory cache immediately to avoid UI hiccups later
-            try {
-                storeMonthInMemory(mKey, ym, dto.map { it.toDomain() })
-            } catch (e: Throwable) {
-                Log.w(TAG, "Failed to prebuild memory cache for month=$ym", e)
-                // Memory cache is optional; fall back to lazy build on demand
-            }
-
-            Log.d(TAG, "Data cached successfully")
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to fetch data from API", e)
+            LogStorage.i(context, "Update", "${ym}: помилка оновлення — ${e.javaClass.simpleName}: ${e.message}")
             // keep old cache; do not update stamp so we'll retry next time
         }
+    }
+
+    private data class DiffResult(
+        val hasChanges: Boolean,
+        val added: Int,
+        val removed: Int,
+        val changed: Int,
+        val details: List<String>
+    ) {
+        val summary: String
+            get() {
+                val parts = mutableListOf<String>()
+                if (added > 0) parts.add("додано $added")
+                if (removed > 0) parts.add("видалено $removed")
+                if (changed > 0) parts.add("змінено $changed")
+                return if (parts.isEmpty()) "без змін" else parts.joinToString(", ")
+            }
+    }
+
+    private fun computeDiff(old: List<EventDto>, cur: List<EventDto>): DiffResult {
+        if (old.isEmpty() && cur.isEmpty()) return DiffResult(false, 0, 0, 0, emptyList())
+        val oldById = old.associateBy { it.id }
+        val curById = cur.associateBy { it.id }
+        val addedIds = curById.keys - oldById.keys
+        val removedIds = oldById.keys - curById.keys
+        var changed = 0
+        val detail = mutableListOf<String>()
+        val shared = oldById.keys.intersect(curById.keys)
+        for (id in shared) {
+            val a = oldById[id]!!
+            val b = curById[id]!!
+            if (!dtoEquals(a, b)) {
+                changed++
+                detail.add("#$id: ${a.subject.title} → зміни у події")
+            }
+        }
+        val has = addedIds.isNotEmpty() || removedIds.isNotEmpty() || changed > 0
+        if (addedIds.isNotEmpty()) detail.add("додано: ${addedIds.size}")
+        if (removedIds.isNotEmpty()) detail.add("видалено: ${removedIds.size}")
+        return DiffResult(has, addedIds.size, removedIds.size, changed, detail)
+    }
+
+    private fun dtoEquals(a: EventDto, b: EventDto): Boolean {
+        if (a.id != b.id) return false
+        return a.startedAt == b.startedAt &&
+            a.endedAt == b.endedAt &&
+            a.type == b.type &&
+            a.auditorium.id == b.auditorium.id &&
+            a.auditorium.name == b.auditorium.name &&
+            a.numberPair == b.numberPair &&
+            a.subject.id == b.subject.id &&
+            a.subject.title == b.subject.title &&
+            a.subject.brief == b.subject.brief &&
+            a.groups.map { it.id } == b.groups.map { it.id } &&
+            a.teachers.map { it.id } == b.teachers.map { it.id }
     }
 
     private fun loadCachedDtos(context: Context, ym: YearMonth): List<EventDto> {
@@ -117,7 +199,7 @@ object EventRepository {
         val mKey = monthKey(active.first, active.second, ym)
         val json = prefs(context).getString(KEY_DATA + mKey, null)
 
-        Log.d(TAG, "Loading cached data: monthKey=$mKey, hasData=${json != null}")
+        Log.d(TAG, "Loading cached data: monthKey=$mKey, hasData=${'$'}{json != null}")
 
         if (json == null) {
             Log.w(TAG, "No cached data found")
@@ -186,6 +268,26 @@ object EventRepository {
         try { getOrBuildMonthCache(context, ym) } catch (_: Throwable) {}
     }
 
+    // Local filter predicate using stored filters
+    private fun applyLocalFilters(context: Context, events: List<Event>): List<Event> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive()
+        val isGroup = active?.first == ScheduleType.GROUP
+        val filters = if (isGroup) FiltersStorage(context).get(active!!.first, active.second) else FiltersStorage.Filters()
+
+        // Always exclude hidden subjects from calendar views
+        val baseSeq = events.asSequence().filter { it.subject.id !in HiddenSubjectsStorage(context).getAll() }
+
+        if (!isGroup) return baseSeq.toList()
+
+        var seq = baseSeq
+        if (filters.lessonTypes.isNotEmpty()) seq = seq.filter { it.type in filters.lessonTypes }
+        if (filters.teachers.isNotEmpty()) seq = seq.filter { e -> e.teachers.any { it.id in filters.teachers } }
+        if (filters.auditoriums.isNotEmpty()) seq = seq.filter { e -> e.auditorium.id in filters.auditoriums }
+        if (filters.subjects.isNotEmpty()) seq = seq.filter { e -> e.subject.id in filters.subjects }
+        return seq.toList()
+    }
+
     // Fast, non-blocking accessors that rely only on in-memory cache.
     // Return empty list if cache is not yet built.
     fun getEventsForDateFast(context: Context, date: LocalDate): List<Event> {
@@ -194,7 +296,7 @@ object EventRepository {
         val ym = YearMonth.from(date)
         val mKey = monthKey(active.first, active.second, ym)
         val list = memoryCache[mKey]?.byDate?.get(date).orEmpty()
-        return list
+        return applyLocalFilters(context, list)
     }
 
     fun getEventsForWeekFast(context: Context, startOfWeek: LocalDate): List<Event> {
@@ -210,10 +312,11 @@ object EventRepository {
             else -> memoryCache[keyStart]?.all.orEmpty() + memoryCache[keyEnd]?.all.orEmpty()
         }
         if (all.isEmpty()) return emptyList()
-        return all.asSequence()
+        val filtered = all.asSequence()
             .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
             .sortedBy { it.start }
             .toList()
+        return applyLocalFilters(context, filtered)
     }
 
     fun getEventsForDate(context: Context, date: LocalDate): List<Event> {
@@ -221,17 +324,15 @@ object EventRepository {
         return try {
             val cache = kotlinx.coroutines.runBlocking { getOrBuildMonthCache(context, ym) }
             val list = cache?.byDate?.get(date).orEmpty()
-            Log.d(TAG, "getEventsForDate: date=$date, found ${list.size} events")
-            list
+            Log.d(TAG, "getEventsForDate: date=$date, found ${'$'}{list.size} events (before local filters)")
+            applyLocalFilters(context, list)
         } catch (e: Throwable) {
-            Log.w(TAG, "Fallback path for getEventsForDate due to ${e.message}")
-            // Fallback to previous implementation if something goes wrong
+            Log.w(TAG, "Fallback path for getEventsForDate due to ${'$'}{e.message}")
             val events = loadCachedDtos(context, ym)
                 .map { it.toDomain() }
                 .filter { !it.start.toLocalDate().isAfter(date) && !it.end.toLocalDate().isBefore(date) }
                 .sortedBy { it.start }
-            Log.d(TAG, "getEventsForDate[fallback]: date=$date, found ${events.size} events")
-            events
+            applyLocalFilters(context, events)
         }
     }
 
@@ -253,10 +354,10 @@ object EventRepository {
                 .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
                 .sortedBy { it.start }
                 .toList()
-            Log.d(TAG, "getEventsForWeek: startOfWeek=$startOfWeek, found ${events.size} events")
-            events
+            Log.d(TAG, "getEventsForWeek: startOfWeek=$startOfWeek, found ${'$'}{events.size} events (before local filters)")
+            applyLocalFilters(context, events)
         } catch (e: Throwable) {
-            Log.w(TAG, "Fallback path for getEventsForWeek due to ${e.message}")
+            Log.w(TAG, "Fallback path for getEventsForWeek due to ${'$'}{e.message}")
             val dtos = if (ymStart == ymEnd) {
                 loadCachedDtos(context, ymStart)
             } else {
@@ -266,8 +367,7 @@ object EventRepository {
                 .map { it.toDomain() }
                 .filter { !(it.end.toLocalDate().isBefore(startOfWeek) || it.start.toLocalDate().isAfter(end)) }
                 .sortedBy { it.start }
-            Log.d(TAG, "getEventsForWeek[fallback]: startOfWeek=$startOfWeek, found ${events.size} events")
-            return events
+            return applyLocalFilters(context, events)
         }
     }
 
@@ -280,6 +380,13 @@ object EventRepository {
     fun clearAll(context: Context) {
         prefs(context).edit { clear() }
         invalidateMemory()
+    }
+
+    fun clearStampForMonth(context: Context, ym: YearMonth) {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return
+        val mKey = monthKey(active.first, active.second, ym)
+        prefs(context).edit { remove(KEY_DAY + mKey) }
     }
 
     fun getSubjectNamesFromCache(context: Context): Map<Long, String> {
@@ -306,6 +413,67 @@ object EventRepository {
             }
         }
         return map
+    }
+
+    fun getCachedTeachersForActive(context: Context): Map<Long, Pair<String, String>> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyMap()
+        val prefix = KEY_DATA + cacheKey(active.first, active.second) + "_"
+        val out = LinkedHashMap<Long, Pair<String, String>>()
+        prefs(context).all.forEach { (k, v) ->
+            if (k.startsWith(prefix) && v is String) {
+                try {
+                    val type = object : com.google.gson.reflect.TypeToken<List<com.mindenit.schedule.network.EventDto>>() {}.type
+                    val events: List<com.mindenit.schedule.network.EventDto> = gson.fromJson(v, type) ?: emptyList()
+                    for (e in events) {
+                        e.teachers.forEach { t ->
+                            if (!out.containsKey(t.id)) out[t.id] = t.fullName to t.shortName
+                        }
+                    }
+                } catch (_: Throwable) { }
+            }
+        }
+        return out
+    }
+
+    fun getCachedAuditoriumsForActive(context: Context): Map<Long, String> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyMap()
+        val prefix = KEY_DATA + cacheKey(active.first, active.second) + "_"
+        val out = LinkedHashMap<Long, String>()
+        prefs(context).all.forEach { (k, v) ->
+            if (k.startsWith(prefix) && v is String) {
+                try {
+                    val type = object : com.google.gson.reflect.TypeToken<List<com.mindenit.schedule.network.EventDto>>() {}.type
+                    val events: List<com.mindenit.schedule.network.EventDto> = gson.fromJson(v, type) ?: emptyList()
+                    for (e in events) {
+                        val aId = e.auditorium.id.toLong()
+                        if (!out.containsKey(aId)) out[aId] = e.auditorium.name
+                    }
+                } catch (_: Throwable) { }
+            }
+        }
+        return out
+    }
+
+    fun getCachedSubjectsForActive(context: Context): Map<Long, Pair<String, String>> {
+        val storage = SchedulesStorage(context)
+        val active = storage.getActive() ?: return emptyMap()
+        val prefix = KEY_DATA + cacheKey(active.first, active.second) + "_"
+        val out = LinkedHashMap<Long, Pair<String, String>>()
+        prefs(context).all.forEach { (k, v) ->
+            if (k.startsWith(prefix) && v is String) {
+                try {
+                    val type = object : com.google.gson.reflect.TypeToken<List<com.mindenit.schedule.network.EventDto>>() {}.type
+                    val events: List<com.mindenit.schedule.network.EventDto> = gson.fromJson(v, type) ?: emptyList()
+                    for (e in events) {
+                        val s = e.subject
+                        if (!out.containsKey(s.id)) out[s.id] = s.title to s.brief
+                    }
+                } catch (_: Throwable) { }
+            }
+        }
+        return out
     }
 }
 

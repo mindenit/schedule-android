@@ -70,13 +70,10 @@ class CalendarState(private val context: Context) {
         val previousState = hasActiveSchedule
         val previousHash = lastActiveScheduleHash
 
-        hasActiveSchedule = storage.getActive() != null || storage.getAll().isNotEmpty()
+        // Only treat as active when an active schedule is set
+        hasActiveSchedule = storage.getActive() != null
         lastActiveScheduleHash = generateScheduleHash(storage)
 
-        // Ререндер потрібен тільки якщо:
-        // 1. Змінився стан наявності розкладу
-        // 2. Змінився хеш розкладів (додали/видалили/змінили розклад)
-        // 3. Це перший запуск
         return previousState != hasActiveSchedule ||
                previousHash != lastActiveScheduleHash ||
                !hasEverBeenInitialized

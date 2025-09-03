@@ -10,8 +10,6 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
-import com.mindenit.schedule.R
-import com.google.android.material.R as MaterialR
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -64,46 +62,46 @@ class DayScheduleView @JvmOverloads constructor(
 
     // Paints with optimized initialization
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
         strokeWidth = hourLineWidth
     }
     private val halfHourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOutline)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOutline)
         alpha = 80
         strokeWidth = 1f
     }
     private val nowLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
         strokeWidth = 2f * density
     }
     private val nowChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
         style = Paint.Style.FILL
     }
     private val nowChipTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnPrimary)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val nowDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
         style = Paint.Style.FILL
     }
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurface)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurface)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
         isFakeBoldText = true
     }
     private val infoTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorOnSurfaceVariant)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
     }
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorSurfaceContainerHigh)
+        color = MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorSurfaceContainerHigh)
     }
     private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -128,12 +126,12 @@ class DayScheduleView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val gridLeft = timeColWidthPx
-        val gridTop = headerHeightPx
-        val gridRight = width.toFloat()
+        val gridLeft = paddingLeft.toFloat() + timeColWidthPx
+        val gridTop = paddingTop.toFloat() + headerHeightPx
+        val gridRight = width.toFloat() - paddingRight
 
         // Stretch timeline to occupy the full view height
-        val availableHeight = height.toFloat() - gridTop
+        val availableHeight = height.toFloat() - gridTop - paddingBottom
         val minutePx = (availableHeight / (endMinutes - startMinutes).toFloat()).coerceAtLeast(0f)
         fun minuteToY(min: Int): Float = gridTop + (min - startMinutes) * minutePx
 
@@ -171,7 +169,7 @@ class DayScheduleView @JvmOverloads constructor(
 
             // Draw time labels
             val label = String.format(Locale.getDefault(), "%02d:00", hour)
-            val tx = timeColWidthPx - 6f * density
+            val tx = paddingLeft.toFloat() + timeColWidthPx - 6f * density
             val ty = y + titleTextPaint.textSize
             canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
         }
@@ -222,19 +220,19 @@ class DayScheduleView @JvmOverloads constructor(
                 val left = if (cols > 1) slotLeft + idx * (perW + colGap) else slotLeft
                 val right = if (cols > 1) (left + perW).coerceAtMost(slotRight) else slotRight
 
-                // Background card
+                // Background card (square corners)
                 tmpRect.set(
                     left,
                     top + 2f * density,
                     right,
                     bottom - 2f * density
                 )
-                canvas.drawRoundRect(tmpRect, corner, corner, cardPaint)
+                canvas.drawRect(tmpRect, cardPaint)
 
-                // Accent strip
-                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, MaterialR.attr.colorPrimary)
+                // Accent strip (square corners)
+                accentPaint.color = event.color ?: MaterialColors.getColor(this@DayScheduleView, com.google.android.material.R.attr.colorPrimary)
                 val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
-                canvas.drawRoundRect(accentRect, corner, corner, accentPaint)
+                canvas.drawRect(accentRect, accentPaint)
 
                 // Make hit target inside the card (excluding accent)
                 val hitRect = RectF(tmpRect.left, tmpRect.top, tmpRect.right, tmpRect.bottom)
@@ -339,14 +337,14 @@ class DayScheduleView @JvmOverloads constructor(
     }
 
     private fun drawNowOverlay(canvas: Canvas, gridLeft: Float, gridRight: Float, minuteToY: (Int) -> Float) {
-        val today = cachedToday ?: LocalDate.now().also { cachedToday = it }
+        val today = LocalDate.now()
         if (date != today) return
 
         val now = LocalTime.now()
         val minutes = now.hour * 60 + now.minute
         if (minutes !in startMinutes..endMinutes) return
 
-        val y = if (cachedNowY >= 0 && lastDrawnDate == date) cachedNowY else minuteToY(minutes).also { cachedNowY = it }
+        val y = minuteToY(minutes)
 
         // Main line
         canvas.drawLine(gridLeft, y, gridRight, y, nowLinePaint)
@@ -426,9 +424,9 @@ class DayScheduleView @JvmOverloads constructor(
         val minutes = time.hour * 60 + time.minute
         val minutesInWindow = (minutes - startMinutes).coerceIn(0, endMinutes - startMinutes)
         // Match dynamic scaling used in onDraw
-        val availableHeight = height.toFloat() - headerHeightPx
+        val availableHeight = height.toFloat() - paddingTop - paddingBottom - headerHeightPx
         val minutePx = (availableHeight / (endMinutes - startMinutes).toFloat()).coerceAtLeast(0f)
-        val y = headerHeightPx + minutesInWindow * minutePx
+        val y = paddingTop + headerHeightPx + minutesInWindow * minutePx
         return y.toInt()
     }
 
@@ -462,7 +460,7 @@ class DayScheduleView @JvmOverloads constructor(
         override fun run() {
             // Only invalidate if showing today to avoid extra work
             if (date == LocalDate.now()) invalidate()
-            postDelayed(this, 30_000L)
+            postDelayed(this, 15_000L)
         }
     }
 

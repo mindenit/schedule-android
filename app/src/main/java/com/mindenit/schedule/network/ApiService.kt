@@ -41,4 +41,20 @@ interface ApiService {
         @Query("filters.groups") groups: String? = null,
         @Query("filters.subjects") subjects: String? = null
     ): com.mindenit.schedule.network.ApiResponse<List<com.mindenit.schedule.network.EventDto>>
+
+    // Filters data for groups
+    @GET("api/groups/{id}/auditoriums")
+    suspend fun getGroupAuditoriums(
+        @Path("id") id: Long
+    ): com.mindenit.schedule.network.ApiResponse<List<com.mindenit.schedule.network.AuditoriumDto>>
+
+    @GET("api/groups/{id}/teachers")
+    suspend fun getGroupTeachers(
+        @Path("id") id: Long
+    ): com.mindenit.schedule.network.ApiResponse<List<com.mindenit.schedule.network.TeacherDto>>
+
+    @GET("api/groups/{id}/subjects")
+    suspend fun getGroupSubjects(
+        @Path("id") id: Long
+    ): com.mindenit.schedule.network.ApiResponse<List<com.mindenit.schedule.network.SubjectListItemDto>>
 }

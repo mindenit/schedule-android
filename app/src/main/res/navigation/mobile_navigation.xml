@@ -25,6 +25,12 @@
         <action
             android:id="@+id/action_settings_to_manage_links"
             app:destination="@id/navigation_manage_links" />
+        <action
+            android:id="@+id/action_settings_to_manage_hidden_subjects"
+            app:destination="@id/navigation_manage_hidden_subjects" />
+        <action
+            android:id="@+id/action_settings_to_logs"
+            app:destination="@id/navigation_logs" />
     </fragment>
 
     <fragment
@@ -32,4 +38,16 @@
         android:name="com.mindenit.schedule.ui.settings.ManageLinksFragment"
         android:label="@string/links_manage_screen_title"
         tools:layout="@layout/fragment_manage_links" />
+
+    <fragment
+        android:id="@+id/navigation_manage_hidden_subjects"
+        android:name="com.mindenit.schedule.ui.settings.ManageHiddenSubjectsFragment"
+        android:label="@string/hidden_subjects_screen_title"
+        tools:layout="@layout/fragment_manage_hidden_subjects" />
+
+    <fragment
+        android:id="@+id/navigation_logs"
+        android:name="com.mindenit.schedule.ui.settings.LogViewerFragment"
+        android:label="@string/logs_screen_title"
+        tools:layout="@layout/fragment_logs" />
 </navigation>

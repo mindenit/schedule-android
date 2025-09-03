@@ -229,5 +229,14 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Hide/unhide subject button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_toggle_hide_subject"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/hide_subject" />
+
     </LinearLayout>
 </ScrollView>

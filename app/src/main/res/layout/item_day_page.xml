@@ -8,5 +8,7 @@
     <com.mindenit.schedule.ui.home.DayScheduleView
         android:id="@+id/day_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp" />
 </androidx.core.widget.NestedScrollView>

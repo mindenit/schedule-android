@@ -1,5 +1,7 @@
 package com.mindenit.schedule.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -22,6 +24,8 @@ import com.mindenit.schedule.data.SubjectLinksStorage
 import androidx.appcompat.app.AppCompatDelegate
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.DialogInterface
+import com.mindenit.schedule.ui.notifications.NotificationsScheduler
+import com.mindenit.schedule.data.HiddenSubjectsStorage
 
 class SettingsFragment : Fragment() {
     private var healthContainer: View? = null
@@ -38,11 +42,21 @@ class SettingsFragment : Fragment() {
         root.findViewById<View>(R.id.manage_links_row)?.setOnClickListener {
             findNavController().navigate(R.id.navigation_manage_links)
         }
+        // Manage hidden subjects navigation
+        root.findViewById<View>(R.id.manage_hidden_subjects_row)?.setOnClickListener {
+            findNavController().navigate(R.id.navigation_manage_hidden_subjects)
+        }
+        // Logs navigation
+        root.findViewById<View>(R.id.logs_row)?.setOnClickListener {
+            findNavController().navigate(R.id.navigation_logs)
+        }
 
         // Theme selection
         root.findViewById<View>(R.id.theme_row)?.setOnClickListener { showThemeDialog() }
         // Default view selection
         root.findViewById<View>(R.id.default_view_row)?.setOnClickListener { showDefaultViewDialog() }
+        // Notifications lead time
+        root.findViewById<View>(R.id.notifications_row)?.setOnClickListener { showNotificationsDialog() }
 
         // Clear all data
         root.findViewById<View>(R.id.btn_clear_data)?.setOnClickListener {
@@ -58,9 +72,18 @@ class SettingsFragment : Fragment() {
                 .show()
         }
 
+        // Support button
+        root.findViewById<View>(R.id.btn_support)?.setOnClickListener {
+            val url = "https://base.monobank.ua/93NFt4Rk2fM3vF"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+        }
+
         // Initialize summaries
         updateThemeSummary(root)
         updateDefaultViewSummary(root)
+        updateNotificationsSummary(root)
 
         return root
     }
@@ -85,6 +108,12 @@ class SettingsFragment : Fragment() {
             else -> getString(R.string.default_view_month)
         }
         root.findViewById<TextView>(R.id.default_view_summary)?.text = summary
+    }
+
+    private fun updateNotificationsSummary(root: View) {
+        val minutes = getSelectedOffsets()
+        val summary = if (minutes.isEmpty()) "—" else minutes.joinToString(", ")
+        root.findViewById<TextView>(R.id.notifications_summary)?.text = getString(R.string.settings_notifications_summary, summary)
     }
 
     private fun showThemeDialog() {
@@ -142,6 +171,45 @@ class SettingsFragment : Fragment() {
             .show()
     }
 
+    private fun showNotificationsDialog() {
+        val ctx = requireContext()
+        val options = (5..30 step 5).toList()
+        val labels = options.map { "$it хв" }.toTypedArray()
+        val selected = getSelectedOffsets().toMutableSet()
+        val checked = options.map { selected.contains(it) }.toBooleanArray()
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.settings_notifications_title)
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                val value = options[which]
+                if (isChecked) selected.add(value) else selected.remove(value)
+            }
+            .setPositiveButton(R.string.confirm) { d, _ ->
+                saveSelectedOffsets(selected)
+                updateNotificationsSummary(requireView())
+                // Reschedule notifications according to new preferences off the main thread
+                viewLifecycleOwner.lifecycleScope.launch(Dispatchers.Default) {
+                    NotificationsScheduler.scheduleForUpcoming(ctx)
+                }
+                d.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun getSelectedOffsets(): List<Int> {
+        val sp = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val raw = sp.getString("pref_notif_offsets", null)
+        val list = raw?.split(',')?.mapNotNull { it.trim().toIntOrNull() }?.filter { it in 5..30 && it % 5 == 0 }?.sorted()
+        return if (list.isNullOrEmpty()) listOf(5) else list
+    }
+
+    private fun saveSelectedOffsets(values: Set<Int>) {
+        val normalized = values.filter { it in 5..30 && it % 5 == 0 }.sorted().ifEmpty { listOf(5) }
+        PreferenceManager.getDefaultSharedPreferences(requireContext())
+            .edit().putString("pref_notif_offsets", normalized.joinToString(",")).apply()
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         checkHealth()
@@ -178,6 +246,8 @@ class SettingsFragment : Fragment() {
         EventRepository.clearAll(ctx)
         // Clear subject links
         SubjectLinksStorage.clearAll(ctx)
+        // Clear hidden subjects
+        HiddenSubjectsStorage.clearAll(ctx)
         // Clear app preferences (theme, defaults, etc.)
         PreferenceManager.getDefaultSharedPreferences(ctx).edit().clear().apply()
     }

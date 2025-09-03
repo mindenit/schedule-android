@@ -24,6 +24,7 @@ import com.kizitonwose.calendar.view.ViewContainer
 import com.kizitonwose.calendar.view.MonthDayBinder
 import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * Управління календарними режимами та їх ініціалізацією
@@ -388,6 +389,22 @@ class CalendarManager(
                 val domain = we.meta as? com.mindenit.schedule.data.Event ?: return@WeekPagerAdapter
                 val fm = (binding.root.context as? androidx.appcompat.app.AppCompatActivity)?.supportFragmentManager ?: return@WeekPagerAdapter
                 EventDetailsBottomSheet.from(domain).show(fm, "event_details")
+            },
+            onGroupClicked = { list ->
+                if (list.isEmpty()) return@WeekPagerAdapter
+                val ctxDlg = binding.root.context
+                val labels = list.map { it.title }.toTypedArray()
+                MaterialAlertDialogBuilder(ctxDlg)
+                    .setTitle(R.string.title_home)
+                    .setItems(labels) { dialog, which ->
+                        val selected = list.getOrNull(which) ?: return@setItems
+                        val domain = selected.meta as? com.mindenit.schedule.data.Event ?: return@setItems
+                        val fm = (binding.root.context as? androidx.appcompat.app.AppCompatActivity)?.supportFragmentManager ?: return@setItems
+                        EventDetailsBottomSheet.from(domain).show(fm, "event_details")
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
             }
         )
         pager.adapter = weekPagerAdapter

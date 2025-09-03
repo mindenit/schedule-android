@@ -8,6 +8,12 @@
         app:iconTint="?attr/colorOnSurface"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_filters"
+        android:icon="@drawable/ic_filter_24"
+        android:title="@string/action_filters"
+        app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="always" />
+    <item
         android:id="@+id/action_refresh_schedule"
         android:icon="@drawable/ic_refresh_schedule_24"
         android:title="@string/action_refresh_schedule"

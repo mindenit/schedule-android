@@ -24,6 +24,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.YearMonth
 import com.mindenit.schedule.data.SchedulesStorage
+import java.time.DayOfWeek
+import java.time.temporal.TemporalAdjusters
+import androidx.fragment.app.setFragmentResultListener
+import com.mindenit.schedule.data.ScheduleType
+import com.mindenit.schedule.data.FiltersStorage
 
 /**
  * Оптимізований HomeFragment з декомпозицією та розумним кешуванням
@@ -87,6 +92,29 @@ class HomeFragment : Fragment() {
         Log.d(logTag, "onViewCreated: start")
         super.onViewCreated(view, savedInstanceState)
 
+        // Listen for hidden subjects changes to refresh calendar
+        requireActivity().supportFragmentManager.setFragmentResultListener("hidden_subjects_changed", viewLifecycleOwner) { _, _ ->
+            calendarManager.refreshVisible()
+            updateFabVisibility()
+        }
+        // Listen on Activity FragmentManager (EventDetailsBottomSheet posts to activity FM)
+        setFragmentResultListener("hidden_subjects_changed") { _, _ ->
+            calendarManager.refreshVisible()
+            updateFabVisibility()
+        }
+        // Listen for filters changes to refresh calendar (childFragmentManager, where dialog is shown)
+        childFragmentManager.setFragmentResultListener("filters_changed", viewLifecycleOwner) { _, _ ->
+            calendarManager.refreshVisible()
+            updateFabVisibility()
+            (activity as? AppCompatActivity)?.invalidateOptionsMenu()
+        }
+        // Keep parent manager listener for other sources if any
+        setFragmentResultListener("filters_changed") { _, _ ->
+            calendarManager.refreshVisible()
+            updateFabVisibility()
+            (activity as? AppCompatActivity)?.invalidateOptionsMenu()
+        }
+
         // Prefetch events cache for current month (once per day) before rendering
         viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -103,12 +131,16 @@ class HomeFragment : Fragment() {
         calendarLoader = CalendarLoader(binding, viewLifecycleOwner.lifecycleScope)
         calendarManager = CalendarManager(binding, calendarState, calendarLoader, viewLifecycleOwner.lifecycleScope)
         calendarNavigator = CalendarNavigator(this, calendarState, calendarManager, calendarLoader)
-        // Update header when user swipes pages
-        calendarManager.onHeaderUpdate = { calendarNavigator.updateTitle() }
+        // Update header when user swipes pages and also update FAB visibility
+        calendarManager.onHeaderUpdate = {
+            calendarNavigator.updateTitle()
+            updateFabVisibility()
+        }
         // Also re-apply title after NavigationUI sets destination label
         navDestListener = NavController.OnDestinationChangedListener { _, dest, _ ->
             if (dest.id == R.id.navigation_home) {
                 calendarNavigator.updateTitle()
+                updateFabVisibility()
             }
         }
         findNavController().addOnDestinationChangedListener(navDestListener!!)
@@ -128,13 +160,14 @@ class HomeFragment : Fragment() {
         } else if (calendarState.hasActiveSchedule) {
             Log.d(logTag, "onViewCreated: quick restore without rerender")
             calendarNavigator.fastRestore()
-            binding.fabToday.isVisible = true
+            updateFabVisibility()
         } else {
             Log.d(logTag, "onViewCreated: showing empty state")
             showEmptyState()
         }
 
         calendarNavigator.updateTitle()
+        updateFabVisibility()
         Log.d(logTag, "onViewCreated: completed")
     }
 
@@ -173,6 +206,13 @@ class HomeFragment : Fragment() {
         }
     }
 
+    private fun areGroupFiltersActive(): Boolean {
+        val active = SchedulesStorage(requireContext()).getActive() ?: return false
+        if (active.first != ScheduleType.GROUP) return false
+        val f = FiltersStorage(requireContext()).get(active.first, active.second)
+        return f.lessonTypes.isNotEmpty() || f.teachers.isNotEmpty() || f.auditoriums.isNotEmpty() || f.subjects.isNotEmpty()
+    }
+
     private fun setupToolbarMenu() {
         val menuHost: MenuHost = requireActivity()
         menuHost.addMenuProvider(object : MenuProvider {
@@ -182,7 +222,15 @@ class HomeFragment : Fragment() {
 
             override fun onPrepareMenu(menu: Menu) {
                 menu.findItem(R.id.action_calendar_view)?.isVisible = calendarState.hasActiveSchedule
-                menu.findItem(R.id.action_refresh_schedule)?.isVisible = true
+                menu.findItem(R.id.action_refresh_schedule)?.isVisible = calendarState.hasActiveSchedule
+                val active = SchedulesStorage(requireContext()).getActive()
+                val filtersItem = menu.findItem(R.id.action_filters)
+                val filtersVisible = calendarState.hasActiveSchedule && active?.first == ScheduleType.GROUP
+                filtersItem?.isVisible = filtersVisible
+                if (filtersVisible) {
+                    val badged = areGroupFiltersActive()
+                    filtersItem?.setIcon(if (badged) R.drawable.ic_filter_badged_24 else R.drawable.ic_filter_24)
+                }
             }
 
             override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
@@ -193,6 +241,10 @@ class HomeFragment : Fragment() {
                     }
                     R.id.action_refresh_schedule -> {
                         refreshSchedule()
+                        true
+                    }
+                    R.id.action_filters -> {
+                        FiltersDialogFragment().show(childFragmentManager, "filters_dialog")
                         true
                     }
                     else -> false
@@ -212,13 +264,13 @@ class HomeFragment : Fragment() {
         Toast.makeText(ctx, R.string.refreshing_schedule, Toast.LENGTH_SHORT).show()
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Clear all cached events (disk + memory)
-                EventRepository.clearAll(ctx)
-                // Prefetch 24 months around current month ([-11, +12])
+                // Do not clear cached events; only clear the 'stamp' to force re-fetch with diff check
                 val base = YearMonth.now()
                 for (offset in -11..12) {
+                    val ym = base.plusMonths(offset.toLong())
                     try {
-                        EventRepository.ensureMonthCached(ctx, base.plusMonths(offset.toLong()))
+                        EventRepository.clearStampForMonth(ctx, ym)
+                        EventRepository.ensureMonthCached(ctx, ym)
                     } catch (_: Throwable) { }
                 }
             } finally {
@@ -251,9 +303,28 @@ class HomeFragment : Fragment() {
             }
         }
 
-        // Оновлюємо меню
+        // Оновлюємо меню і FAB
         (activity as? AppCompatActivity)?.invalidateOptionsMenu()
+        updateFabVisibility()
         Log.d(logTag, "onResume: completed")
+    }
+
+    // --- Helpers to control FAB visibility ---
+    private fun isOnCurrentPeriod(): Boolean {
+        return when (calendarState.viewMode) {
+            CalendarState.ViewMode.MONTH -> calendarState.selectedYearMonth == YearMonth.now()
+            CalendarState.ViewMode.WEEK -> {
+                val selWeek = calendarState.selectedDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                val curWeek = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                selWeek == curWeek
+            }
+            CalendarState.ViewMode.DAY -> calendarState.selectedDate == LocalDate.now()
+        }
+    }
+
+    private fun updateFabVisibility() {
+        val shouldShow = calendarState.hasActiveSchedule && !isOnCurrentPeriod()
+        binding.fabToday.isVisible = shouldShow
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -275,20 +346,30 @@ class HomeFragment : Fragment() {
 
         // Ховаємо empty state
         binding.emptyState.isGone = true
-        binding.fabToday.isVisible = true
+        // Do not force-show FAB here; update visibility based on current period below
 
         // Рендеримо календар
         calendarNavigator.renderMode { clickedDate ->
             calendarState.selectedDate = clickedDate
             calendarNavigator.goToMode(CalendarState.ViewMode.DAY)
         }
+        // Update FAB according to whether we're on the current period
+        updateFabVisibility()
     }
 
     private fun showEmptyState() {
-        calendarLoader.hideOtherPagers(CalendarState.ViewMode.MONTH)
+        // Ensure all calendar views and weekday header are hidden
+        binding.weekdayHeader.isGone = true
+        binding.calendarView.isGone = true
+        binding.calendarPager.isGone = true
+        binding.weekPager.isGone = true
+        binding.dayPager.isGone = true
+        // Show empty state only
         binding.loadingState.isGone = true
         binding.emptyState.isVisible = true
         binding.fabToday.isVisible = false
+        // Invalidate the options menu so actions get hidden
+        (activity as? AppCompatActivity)?.invalidateOptionsMenu()
     }
 
     private fun showViewModePopup() {

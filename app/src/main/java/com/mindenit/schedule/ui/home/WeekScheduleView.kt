@@ -11,7 +11,6 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.google.android.material.color.MaterialColors
-import com.mindenit.schedule.R
 import com.google.android.material.R as MaterialR
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -81,15 +80,6 @@ class WeekScheduleView @JvmOverloads constructor(
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
         strokeWidth = 2f * resources.displayMetrics.density
     }
-    private val nowChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
-        style = Paint.Style.FILL
-    }
-    private val nowChipTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnPrimary)
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
-        isFakeBoldText = true
-    }
     private val nowDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorPrimary)
         style = Paint.Style.FILL
@@ -106,6 +96,11 @@ class WeekScheduleView @JvmOverloads constructor(
     private val timeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurfaceVariant)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
+    }
+    // Smaller time text for event cards (half size)
+    private val eventTimeTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurfaceVariant)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 6f, resources.displayMetrics)
     }
     private val titleTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = MaterialColors.getColor(this@WeekScheduleView, MaterialR.attr.colorOnSurface)
@@ -131,19 +126,34 @@ class WeekScheduleView @JvmOverloads constructor(
     // Hit detection rects for events
     private val hitRects: MutableList<Pair<RectF, WeekEvent>> = mutableListOf()
 
+    // Hit detection rects for event groups (3+ concurrent)
+    private val groupHitRects: MutableList<Pair<RectF, List<WeekEvent>>> = mutableListOf()
+
     // Track press within an event to coordinate with parent scroll
     private var downInsideEvent = false
+
+    // Track press within an event or group
+    private var downInsideGroup = false
 
     // Event click listener
     var onEventClick: ((WeekEvent) -> Unit)? = null
 
+    // Group click listener
+    var onGroupClick: ((List<WeekEvent>) -> Unit)? = null
+
     // Periodic ticker to keep the now indicator updated
     private val nowTicker = object : Runnable {
         override fun run() {
-            invalidate()
-            postDelayed(this, 30_000L)
+            val today = LocalDate.now()
+            if (!today.isBefore(startOfWeek) && !today.isAfter(startOfWeek.plusDays((dayCount - 1).toLong()))) {
+                invalidate()
+            }
+            postDelayed(this, 15_000L)
         }
     }
+
+    // Show only Monday–Saturday
+    private val dayCount = 6
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -181,22 +191,23 @@ class WeekScheduleView @JvmOverloads constructor(
         super.onDraw(canvas)
         val h = height.toFloat()
 
-        val gridLeft = timeColWidthPx
-        val gridTop = headerHeightPx
-        val dayWidth = ((width.toFloat() - timeColWidthPx) / 7f).coerceAtLeast(0f)
-        val gridRight = timeColWidthPx + 7f * dayWidth
-        val gridBottom = h
+        val gridLeft = paddingLeft.toFloat() + timeColWidthPx
+        val gridTop = paddingTop.toFloat() + headerHeightPx
+        val contentWidth = width.toFloat() - paddingLeft - paddingRight - timeColWidthPx
+        val dayWidth = (contentWidth / dayCount.toFloat()).coerceAtLeast(0f)
+        val gridRight = paddingLeft.toFloat() + timeColWidthPx + dayCount.toFloat() * dayWidth
+        val gridBottom = h - paddingBottom
 
         val minutePx = hourHeightPx / 60f
         fun minuteToY(min: Int): Float = gridTop + (min - startMinutes) * minutePx
 
         // Background: shade weekends and highlight today (below header)
         val today = LocalDate.now()
-        for (i in 0 until 7) {
+        for (i in 0 until dayCount) {
             val x0 = gridLeft + i * dayWidth
             val x1 = x0 + dayWidth
             val dayDate = startOfWeek.plusDays(i.toLong())
-            if (dayDate.dayOfWeek == DayOfWeek.SATURDAY || dayDate.dayOfWeek == DayOfWeek.SUNDAY) {
+            if (dayDate.dayOfWeek == DayOfWeek.SATURDAY) {
                 tmpRect.set(x0, gridTop, x1, gridBottom)
                 canvas.drawRect(tmpRect, weekendFillPaint)
             }
@@ -206,12 +217,12 @@ class WeekScheduleView @JvmOverloads constructor(
             }
         }
 
-        // Header: weekday labels
-        for (i in 0 until 7) {
+        // Header: weekday labels (Mon–Sat)
+        for (i in 0 until dayCount) {
             val dayDate = startOfWeek.plusDays(i.toLong())
             val label = dayDate.format(dayFormatter).lowercase(Locale.forLanguageTag("uk"))
             val x = gridLeft + i * dayWidth + dayWidth / 2f
-            val y = headerHeightPx / 2f + headerTextPaint.textSize / 2f
+            val y = paddingTop.toFloat() + headerHeightPx / 2f + headerTextPaint.textSize / 2f
             val paint = if (dayDate == today) headerTodayTextPaint else headerTextPaint
             drawCenteredText(canvas, label, x, y, paint)
         }
@@ -236,20 +247,21 @@ class WeekScheduleView @JvmOverloads constructor(
                 canvas.drawLine(gridLeft, bottomHalfY, gridRight, bottomHalfY, halfHourPaint)
             }
             val label = String.format(Locale.getDefault(), "%02d:00", hour)
-            val tx = timeColWidthPx - 6f * density
+            val tx = paddingLeft.toFloat() + timeColWidthPx - 6f * density
             val ty = y + headerTextPaint.textSize
             canvas.drawText(label, tx - timeTextPaint.measureText(label), ty, timeTextPaint)
         }
 
         // Vertical day dividers
-        for (i in 0..7) {
+        for (i in 0..dayCount) {
             val x = gridLeft + i * dayWidth
             canvas.drawLine(x, gridTop, x, gridBottom, gridPaint)
         }
 
-        // Draw events per day
+        // Draw events per day (Mon–Sat only)
         hitRects.clear()
-        for (dayIndex in 0..6) {
+        groupHitRects.clear()
+        for (dayIndex in 0 until dayCount) {
             val dayEvents = events.filter { ((it.start.toLocalDate().dayOfWeek.value + 6) % 7) == dayIndex }
             if (dayEvents.isEmpty()) continue
 
@@ -279,6 +291,23 @@ class WeekScheduleView @JvmOverloads constructor(
                 val accentW = 2f * density
                 val colGap = 2f * density
 
+                // If 3+ events overlap, draw a single group button instead (square corners)
+                if (list.size >= 3) {
+                    val groupLeft = columnLeft + hPad
+                    val groupRight = columnRight - hPad
+                    tmpRect.set(groupLeft, top + vPad, groupRight, bottom - vPad)
+                    canvas.drawRect(tmpRect, cardPaint)
+
+                    // Label: "Пари: N" centered
+                    val label = "Пари: ${list.size}"
+                    val cx = tmpRect.centerX()
+                    val cy = tmpRect.centerY() + titleTextPaint.textSize / 2f
+                    drawCenteredText(canvas, label, cx, cy, titleTextPaint)
+
+                    groupHitRects.add(Pair(RectF(tmpRect), list.toList()))
+                    continue
+                }
+
                 val slotLeft = columnLeft + hPad
                 val slotRight = columnRight - hPad
                 val cols = list.size
@@ -291,38 +320,14 @@ class WeekScheduleView @JvmOverloads constructor(
                     val left = slotLeft + idx * (perW + colGap)
                     val right = (left + perW).coerceAtMost(slotRight)
 
-                    // Card rect
+                    // Card rect (square corners)
                     tmpRect.set(left, top + vPad, right, bottom - vPad)
-                    // Draw with only left corners rounded
-                    tmpPath.reset()
-                    tmpPath.addRoundRect(
-                        tmpRect,
-                        floatArrayOf(
-                            corner, corner, // top-left
-                            0f, 0f,         // top-right
-                            0f, 0f,         // bottom-right
-                            corner, corner  // bottom-left
-                        ),
-                        Path.Direction.CW
-                    )
-                    canvas.drawPath(tmpPath, cardPaint)
+                    canvas.drawRect(tmpRect, cardPaint)
 
-                    // Accent
-                    accentPaint.color = event.color ?: MaterialColors.getColor(this, MaterialR.attr.colorPrimary)
+                    // Accent (square corners)
+                    accentPaint.color = event.color ?: MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary)
                     val accentRect = RectF(tmpRect.left, tmpRect.top, tmpRect.left + accentW, tmpRect.bottom)
-                    // Match left-only rounding for accent bar
-                    tmpPath.reset()
-                    tmpPath.addRoundRect(
-                        accentRect,
-                        floatArrayOf(
-                            corner, corner, // top-left
-                            0f, 0f,         // top-right
-                            0f, 0f,         // bottom-right
-                            corner, corner  // bottom-left
-                        ),
-                        Path.Direction.CW
-                    )
-                    canvas.drawPath(tmpPath, accentPaint)
+                    canvas.drawRect(accentRect, accentPaint)
 
                     // Hit rect per sub-card
                     hitRects.add(Pair(RectF(tmpRect), event))
@@ -336,16 +341,14 @@ class WeekScheduleView @JvmOverloads constructor(
                     val parts = event.title.split(" • ", limit = 2)
                     val subject = parts.getOrNull(0) ?: event.title
                     val location = parts.getOrNull(1)
-                    val startStr = String.format(Locale.getDefault(), "%02d:%02d", event.start.toLocalTime().hour, event.start.toLocalTime().minute)
-                    val endStr = String.format(Locale.getDefault(), "%02d:%02d", event.end.toLocalTime().hour, event.end.toLocalTime().minute)
 
                     // Clip to sub-card
                     val save = canvas.save()
                     canvas.clipRect(tmpRect)
 
-                    // Draw time on two lines (start then end), both wrapped if needed
-                    cursorY = drawWrapped(canvas, startStr, contentLeft, contentRight, cursorY, timeTextPaint, tmpRect.bottom - 6f * density)
-                    cursorY = drawWrapped(canvas, endStr, contentLeft, contentRight, cursorY, timeTextPaint, tmpRect.bottom - 6f * density)
+                    // Time: draw single line if width allows (wrap if needed)
+                    val timeText = formatTimeRange(event.start.toLocalTime(), event.end.toLocalTime())
+                    cursorY = drawWrapped(canvas, timeText, contentLeft, contentRight, cursorY, eventTimeTextPaint, tmpRect.bottom - 6f * density)
 
                     // Available height below
                     var available = tmpRect.height() - (cursorY - tmpRect.top) - 6f * density
@@ -372,12 +375,13 @@ class WeekScheduleView @JvmOverloads constructor(
     }
 
     private fun drawNowOverlay(canvas: Canvas, today: LocalDate, gridLeft: Float, dayWidth: Float, minuteToY: (Int) -> Float) {
-        if (today.isBefore(startOfWeek) || today.isAfter(startOfWeek.plusDays(6))) return
+        if (today.isBefore(startOfWeek) || today.isAfter(startOfWeek.plusDays((dayCount - 1).toLong()))) return
         val now = LocalTime.now()
         val minutes = now.hour * 60 + now.minute
         if (minutes !in startMinutes..endMinutes) return
         val y = minuteToY(minutes)
         val dayIndex = (today.dayOfWeek.value + 6) % 7
+        if (dayIndex >= dayCount) return // Skip Sunday
         val x0 = gridLeft + dayIndex * dayWidth
         val x1 = x0 + dayWidth
 
@@ -389,21 +393,7 @@ class WeekScheduleView @JvmOverloads constructor(
         val dotCx = x0 + 4f * resources.displayMetrics.density
         canvas.drawCircle(dotCx, y, dotR, nowDotPaint)
 
-        // Time chip near left edge
-        val timeText = String.format(Locale.getDefault(), "%02d:%02d", now.hour, now.minute)
-        val padH = 8f * resources.displayMetrics.density
-        val padV = 4f * resources.displayMetrics.density
-        val textW = nowChipTextPaint.measureText(timeText)
-        val textH = nowChipTextPaint.textSize
-        val chipLeft = x0 + 8f * resources.displayMetrics.density
-        val chipTop = y - textH / 2f - padV
-        val chipRight = (chipLeft + textW + 2 * padH).coerceAtMost(x1 - 4f * resources.displayMetrics.density)
-        val chipBottom = y + textH / 2f + padV
-        val chipRect = RectF(chipLeft, chipTop, chipRight, chipBottom)
-        val radius = 12f * resources.displayMetrics.density
-        canvas.drawRoundRect(chipRect, radius, radius, nowChipPaint)
-        val baseline = y + textH / 2f - 2f * resources.displayMetrics.density
-        canvas.drawText(timeText, chipLeft + padH, baseline, nowChipTextPaint)
+        // Remove time chip label
     }
 
     // Draws text wrapped by characters within [left,right] and up to maxBottom.
@@ -497,7 +487,13 @@ class WeekScheduleView @JvmOverloads constructor(
         val y = event.y
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                // If touch starts inside any event, handle it here and keep parent from intercepting
+                // Check groups first
+                downInsideGroup = groupHitRects.any { it.first.contains(x, y) }
+                if (downInsideGroup) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+                // If touch starts inside any event, handle it here
                 downInsideEvent = hitRects.any { it.first.contains(x, y) }
                 if (downInsideEvent) {
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -505,6 +501,15 @@ class WeekScheduleView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP -> {
+                if (downInsideGroup) {
+                    val hit = groupHitRects.firstOrNull { it.first.contains(x, y) }?.second
+                    downInsideGroup = false
+                    if (hit != null) {
+                        onGroupClick?.invoke(hit)
+                        performClick()
+                        return true
+                    }
+                }
                 if (downInsideEvent) {
                     val hit = hitRects.firstOrNull { it.first.contains(x, y) }?.second
                     downInsideEvent = false
@@ -516,6 +521,7 @@ class WeekScheduleView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_CANCEL -> {
+                downInsideGroup = false
                 downInsideEvent = false
             }
         }

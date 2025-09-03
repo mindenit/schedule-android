@@ -31,6 +31,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.mindenit.schedule.data.HiddenSubjectsStorage
+import androidx.core.os.bundleOf
 
 class EventDetailsBottomSheet : BottomSheetDialogFragment() {
     private var _binding: BottomsheetEventDetailsBinding? = null
@@ -138,6 +140,35 @@ class EventDetailsBottomSheet : BottomSheetDialogFragment() {
             binding.linksCard.visibility = View.VISIBLE
             binding.addLinkButton.setOnClickListener { showLinkDialog(null) }
             renderLinks()
+        }
+
+        // Hide/unhide subject button
+        val sid = subjectId
+        val btn = binding.root.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_toggle_hide_subject)
+        if (sid == null) {
+            btn.visibility = View.GONE
+        } else {
+            val storage = HiddenSubjectsStorage(requireContext())
+            fun updateBtn() {
+                val hidden = storage.isHidden(sid)
+                btn.text = getString(if (hidden) R.string.unhide_subject else R.string.hide_subject)
+            }
+            updateBtn()
+            btn.setOnClickListener {
+                val hidden = storage.isHidden(sid)
+                if (hidden) {
+                    storage.remove(sid)
+                } else {
+                    storage.add(sid)
+                    // Inform user how to restore the subject later
+                    Toast.makeText(requireContext(), getString(R.string.subject_hidden_hint), Toast.LENGTH_LONG).show()
+                }
+                // notify parent to refresh calendar
+                parentFragmentManager.setFragmentResult("hidden_subjects_changed", bundleOf())
+                updateBtn()
+                dismiss()
+            }
+            btn.visibility = View.VISIBLE
         }
     }
 
